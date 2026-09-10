@@ -9,3 +9,7 @@ export { default as ReviewRatingScreen } from './ReviewRatingScreen';
 export { default as DocumentViewerScreen } from './DocumentViewerScreen';
 export { default as AdvocateCallScreen } from './AdvocateCallScreen';
 export { default as LegalNoticeResponseScreen } from './LegalNoticeResponseScreen';
+export { default as AdvocateAnalyticsScreen } from './AdvocateAnalyticsScreen';
+export { default as AdvocateAppointmentCalendarScreen } from './AdvocateAppointmentCalendarScreen';
+export { default as AdvocateSettingsScreen } from './AdvocateSettingsScreen';
+

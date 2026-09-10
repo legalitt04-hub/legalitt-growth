@@ -91,6 +91,9 @@ import EarningsScreen from '../screens/advocate/EarningsScreen';
 import AdvocateWalletScreen from '../screens/advocate/AdvocateWalletScreen';
 import DocumentUploadScreen from '../screens/advocate/DocumentUploadScreen';
 import PendingApprovalScreen from '../screens/advocate/PendingApprovalScreen';
+import AdvocateAnalyticsScreen from '../screens/advocate/AdvocateAnalyticsScreen';
+import AdvocateAppointmentCalendarScreen from '../screens/advocate/AdvocateAppointmentCalendarScreen';
+import AdvocateSettingsScreen from '../screens/advocate/AdvocateSettingsScreen';
 import { CasesScreen, ClientsScreen, CaseDetailScreen, ProfileEditScreen as AdvocateProfileEditScreen, ReviewRatingScreen, DocumentViewerScreen, AdvocateCallScreen, LegalNoticeResponseScreen } from '../screens/advocate';
 
 const Stack = createNativeStackNavigator();
@@ -446,9 +449,14 @@ const AppNavigator = () => {
               <Stack.Screen name="VideoCall" component={AdvocateCallScreen}
                 options={{ animation: 'slide_from_bottom', gestureEnabled: false, headerShown: false }} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
+              {/* ── NEW SCREENS FROM ASTITVA REPO ── */}
+              <Stack.Screen name="AdvocateAnalytics" component={AdvocateAnalyticsScreen} />
+              <Stack.Screen name="AdvocateCalendar" component={AdvocateAppointmentCalendarScreen} />
+              <Stack.Screen name="AdvocateSettings" component={AdvocateSettingsScreen} />
               <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
               <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
               <Stack.Screen name="DataDeletion" component={DataDeletionScreen} />
+              <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
             </>
           ) : (
             // ─── CLIENT EXPERIENCE FLOW (AUTHENTICATED) ───────────────────

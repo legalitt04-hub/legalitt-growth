@@ -537,6 +537,27 @@ const AdvocateDashboardScreen = ({ navigation }) => {
               <Text style={styles.actionLabel}>Withdrawal</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('AdvocateAnalytics')}>
+              <View style={[styles.actionIconBg, { backgroundColor: 'rgba(139, 92, 246, 0.1)' }]}>
+                <Ionicons name="bar-chart-outline" size={20} color="#8B5CF6" />
+              </View>
+              <Text style={styles.actionLabel}>Analytics</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('AdvocateCalendar')}>
+              <View style={[styles.actionIconBg, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
+                <Ionicons name="calendar-outline" size={20} color="#F59E0B" />
+              </View>
+              <Text style={styles.actionLabel}>Calendar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('AdvocateSettings')}>
+              <View style={[styles.actionIconBg, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}>
+                <Ionicons name="settings-outline" size={20} color="#EF4444" />
+              </View>
+              <Text style={styles.actionLabel}>Settings</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.actionBtn} onPress={() => Alert.alert('Share Link', 'Copied your professional profile card link!')}>
               <View style={[styles.actionIconBg, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                 <Ionicons name="share-social-outline" size={20} color="#10B981" />
@@ -545,6 +566,7 @@ const AdvocateDashboardScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
+
 
         {/* Recent Client Reviews Section */}
         <RecentReviewsSection
