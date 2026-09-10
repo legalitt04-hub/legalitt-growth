@@ -6,18 +6,20 @@
     "orientation": "portrait",
     "icon": "./assets/adaptive-icon.png",
     "userInterfaceStyle": "light",
+    "jsEngine": "hermes",
     "splash": {
       "image": "./assets/logo-transparent.png",
       "resizeMode": "contain",
       "backgroundColor": "#07080A"
     },
     "assetBundlePatterns": [
-      "**/*"
+      "assets/*"
     ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.legalitt.app",
       "buildNumber": "1",
+      "jsEngine": "hermes",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Legalitt uses your location to find advocates near you.",
         "NSLocationAlwaysUsageDescription": "Legalitt uses your location to find advocates near you.",
@@ -37,6 +39,9 @@
       },
       "package": "com.legalitt.app",
       "versionCode": 2,
+      "jsEngine": "hermes",
+      "enableProguardInReleaseBuilds": true,
+      "enableShrinkResourcesInReleaseBuilds": true,
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
