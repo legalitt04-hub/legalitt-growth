@@ -230,25 +230,52 @@ const AdvocateDashboardScreen = ({ navigation }) => {
     };
 
     const handleIncomingCall = (callData) => {
-      navigation.navigate('AdvocateCall', {
-        clientName:   callData?.client?.name || callData?.clientName || 'Client',
-        clientAvatar: callData?.client?.avatar || callData?.avatar || null,
-        mode:         callData?.callType || callData?.mode || 'video',
-        bookingId:    callData?.bookingId,
-        clientId:     callData?.clientId || callData?.client?._id,
-        zegoRoomId:   callData?.zegoRoomId   || callData?.videoRoomId   || null,
-        zegoToken:    callData?.advocateToken || callData?.advocateVideoToken || null,
-        zegoAppId:    callData?.zegoAppId    || 0,
-        myUserId:     advocateUser._id || advocateUser.id || '',
-        myUserName:   advocateUser.name || 'Advocate',
-      });
+      // Show Alert so advocate can accept or decline — don't navigate blindly
+      const modeLabel = callData?.mode === 'video' ? '📹 Video' : '📞 Voice';
+      const clientName = callData?.clientName || callData?.client?.name || 'Client';
+
+      Alert.alert(
+        `${modeLabel} Call Incoming!`,
+        `${clientName} is calling you right now.\nTap Accept to join the call.`,
+        [
+          { text: 'Decline', style: 'destructive' },
+          {
+            text: '✅ Accept',
+            onPress: () => {
+              navigation.navigate('AdvocateCall', {
+                clientName,
+                clientAvatar: callData?.clientAvatar || callData?.client?.avatar || null,
+                mode:         callData?.mode || 'video',
+                bookingId:    callData?.bookingId,
+                clientId:     callData?.clientId || callData?.client?._id,
+                zegoRoomId:   callData?.zegoRoomId   || callData?.videoRoomId   || null,
+                zegoToken:    callData?.advocateToken || callData?.advocateVideoToken || null,
+                zegoAppId:    callData?.zegoAppId    || 0,
+                myUserId:     advocateUser._id || advocateUser.id || '',
+                myUserName:   advocateUser.name || 'Advocate',
+              });
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    };
+
+    const handleSlotScheduled = (data) => {
+      Alert.alert(
+        '\uD83D\uDCC5 Consultation Scheduled',
+        `${data?.clientName || 'Client'} has scheduled a ${data?.mode || ''} consultation.\n\nTime: ${data?.scheduledAt ? new Date(data.scheduledAt).toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'TBD'}`,
+        [{ text: 'OK', onPress: () => fetchDashboardData() }]
+      );
     };
 
     socket.on('new_booking_assigned', handleNewBooking);
     socket.on('incoming_call', handleIncomingCall);
+    socket.on('slot_scheduled', handleSlotScheduled);
     return () => {
       socket.off('new_booking_assigned', handleNewBooking);
       socket.off('incoming_call', handleIncomingCall);
+      socket.off('slot_scheduled', handleSlotScheduled);
     };
   }, [navigation, user]);
 
