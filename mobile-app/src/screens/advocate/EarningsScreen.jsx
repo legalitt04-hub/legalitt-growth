@@ -193,7 +193,7 @@ const EarningsScreen = ({ navigation }) => {
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={s.summaryLabel}>Earnings Summary</Text>
               <View style={s.earningsRow}>
-                <Text style={s.bigAmount}>₹{balance.totalEarned.toLocaleString('en-IN')}</Text>
+                <Text style={s.bigAmount}>₹{(balance.totalEarned || 0).toLocaleString('en-IN')}</Text>
                 <Text style={s.monthLabel}>Total Fund</Text>
                 <View style={s.growthBadge}>
                   <Ionicons name="trending-up" size={10} color={COLORS.success} />
@@ -266,7 +266,7 @@ const EarningsScreen = ({ navigation }) => {
                     <Text style={s.txDate}>{formatDate(tx.date)}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                    <Text style={s.txAmount}>₹{tx.amount.toLocaleString('en-IN')}</Text>
+                    <Text style={s.txAmount}>₹{(tx.amount || 0).toLocaleString('en-IN')}</Text>
                     <View style={s.invoiceBadge}>
                       <Ionicons name="document-text-outline" size={10} color={COLORS.primary} />
                       <Text style={s.invoiceBadgeText}>Invoice</Text>
@@ -340,7 +340,7 @@ const EarningsScreen = ({ navigation }) => {
               <Text style={s.sectionHeaderLabel}>Service Details:</Text>
               <View style={s.invoiceItemRow}>
                 <Text style={s.itemDesc}>Professional Legal Consultation Fee</Text>
-                <Text style={s.itemAmount}>₹{selectedTx?.amount.toLocaleString('en-IN')}</Text>
+                <Text style={s.itemAmount}>₹{(selectedTx?.amount || 0).toLocaleString('en-IN')}</Text>
               </View>
               <View style={s.invoiceItemRow}>
                 <Text style={s.itemDesc}>Legalitt Platform Processing Fee (Waived)</Text>
@@ -349,7 +349,7 @@ const EarningsScreen = ({ navigation }) => {
 
               <View style={s.totalContainer}>
                 <Text style={s.totalLabel}>Total Receipt Amount</Text>
-                <Text style={s.totalVal}>₹{selectedTx?.amount.toLocaleString('en-IN')}</Text>
+                <Text style={s.totalVal}>₹{(selectedTx?.amount || 0).toLocaleString('en-IN')}</Text>
               </View>
 
               <TouchableOpacity 

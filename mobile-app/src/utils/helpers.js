@@ -47,9 +47,10 @@ export const formatINR = (amount) => {
 };
 
 export const formatINRShort = (amount) => {
-  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}k`;
-  return `₹${amount}`;
+  const n = Number(amount) || 0;
+  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
+  return `₹${n}`;
 };
 
 // ─── Validators ───────────────────────────────────────────────────────────────
