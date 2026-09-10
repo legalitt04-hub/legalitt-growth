@@ -72,7 +72,9 @@
       },
       "GOOGLE_ANDROID_CLIENT_ID": "400989529051-5jmb7omhkks18b28oqf20b6nk19ggn3u.apps.googleusercontent.com",
       "ZEGO_APP_ID": 857039283,
-      "ZEGO_APP_SIGN": "1f22ef2cbe816ceb20857afd99972d0253cc2d0bc752a38b78ae179a264fc1a1"
+      "ZEGO_APP_SIGN": "1f22ef2cbe816ceb20857afd99972d0253cc2d0bc752a38b78ae179a264fc1a1",
+      "RAZORPAY_KEY_ID": "rzp_test_SeC9MGzYmAerqz",
+      "MOBILE_APP_SECRET": "legalitt_app_v1_secret_2026"
     }
   }
 }

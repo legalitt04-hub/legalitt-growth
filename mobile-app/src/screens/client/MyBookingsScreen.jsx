@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Image, ActivityIndicator, RefreshControl, StatusBar, Alert
+  Image, ActivityIndicator, RefreshControl, StatusBar, Alert,
+  Modal, ScrollView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { bookingAPI, legalAdviceAPI, firAPI } from '../../services/api';
+import api, { bookingAPI, legalAdviceAPI, firAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket } from '../../services/socket';
 import { COLORS } from '../../constants/theme';
@@ -42,6 +43,127 @@ const STATUS_CONFIG = {
 const MODE_ICON = { chat: 'chatbubbles-outline', voice: 'call-outline', video: 'videocam-outline' };
 const MODE_LABEL = { chat: 'Chat Consultation', voice: 'Voice Call', video: 'Video Call' };
 
+// ─── Time slot generator ──────────────────────────────────────────────────────
+const generateTimeSlots = () => {
+  const slots = [];
+  for (let h = 9; h <= 20; h++) {
+    ['00', '30'].forEach(m => {
+      if (h === 20 && m === '30') return;
+      const hour12 = h > 12 ? h - 12 : h;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      slots.push({ label: `${hour12}:${m} ${ampm}`, hour: h, minute: parseInt(m) });
+    });
+  }
+  return slots;
+};
+
+// ─── Next 7 days generator ────────────────────────────────────────────────────
+const getNext7Days = () => {
+  const days = [];
+  const today = new Date();
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push({
+      date: d,
+      dayName: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAY_NAMES[d.getDay()],
+      dayNum: d.getDate(),
+      month: MONTH_NAMES[d.getMonth()],
+    });
+  }
+  return days;
+};
+
+// ─── Schedule Slot Modal ──────────────────────────────────────────────────────
+const ScheduleModal = ({ visible, booking, onClose, onConfirm }) => {
+  const days = getNext7Days();
+  const timeSlots = generateTimeSlots();
+  const [selectedDay, setSelectedDay] = useState(0);
+  const [selectedTime, setSelectedTime] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleConfirm = async () => {
+    if (selectedTime === null) {
+      Alert.alert('Select Time', 'Please select a time slot.');
+      return;
+    }
+    const chosenDate = new Date(days[selectedDay].date);
+    chosenDate.setHours(timeSlots[selectedTime].hour, timeSlots[selectedTime].minute, 0, 0);
+
+    setSaving(true);
+    try {
+      await api.patch(`/bookings/${booking._id}/schedule`, { scheduledAt: chosenDate.toISOString() });
+      onConfirm(chosenDate);
+      Alert.alert('✅ Slot Confirmed!', `Your consultation is scheduled for ${chosenDate.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}.\n\nYour advocate will be notified.`);
+    } catch (err) {
+      Alert.alert('Error', err?.response?.data?.message || 'Could not schedule. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={schedStyles.overlay}>
+        <TouchableOpacity style={schedStyles.backdrop} onPress={onClose} activeOpacity={1} />
+        <View style={schedStyles.sheet}>
+          {/* Header */}
+          <View style={schedStyles.sheetHeader}>
+            <View style={schedStyles.sheetPill} />
+            <Text style={schedStyles.sheetTitle}>📅 Schedule Consultation</Text>
+            <Text style={schedStyles.sheetSubtitle}>Pick a date & time — your advocate will be notified</Text>
+          </View>
+
+          {/* Day Picker */}
+          <Text style={schedStyles.sectionLabel}>SELECT DATE</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={schedStyles.dayScroll}
+            contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}>
+            {days.map((d, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[schedStyles.dayChip, selectedDay === i && schedStyles.dayChipActive]}
+                onPress={() => setSelectedDay(i)}
+              >
+                <Text style={[schedStyles.dayName, selectedDay === i && schedStyles.dayNameActive]}>{d.dayName}</Text>
+                <Text style={[schedStyles.dayNum, selectedDay === i && schedStyles.dayNumActive]}>{d.dayNum}</Text>
+                <Text style={[schedStyles.dayMonth, selectedDay === i && schedStyles.dayMonthActive]}>{d.month}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Time Picker */}
+          <Text style={[schedStyles.sectionLabel, { marginTop: 16 }]}>SELECT TIME</Text>
+          <View style={schedStyles.timeGrid}>
+            {timeSlots.map((t, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[schedStyles.timeChip, selectedTime === i && schedStyles.timeChipActive]}
+                onPress={() => setSelectedTime(i)}
+              >
+                <Text style={[schedStyles.timeLabel, selectedTime === i && schedStyles.timeLabelActive]}>{t.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Confirm Button */}
+          <TouchableOpacity
+            style={[schedStyles.confirmBtn, (saving || selectedTime === null) && schedStyles.confirmBtnDisabled]}
+            onPress={handleConfirm}
+            disabled={saving || selectedTime === null}
+          >
+            {saving
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={schedStyles.confirmBtnText}>Confirm Slot</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function MyBookingsScreen({ navigation }) {
   const { user, isAuthenticated } = useAuth();
   const userData = user?.user || user || {};
@@ -49,6 +171,7 @@ export default function MyBookingsScreen({ navigation }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [scheduleBooking, setScheduleBooking] = useState(null); // which booking is being scheduled
 
   // Guest guard handled inline in render (avoids Android addView crash)
 
@@ -149,6 +272,15 @@ export default function MyBookingsScreen({ navigation }) {
     if (actionType === 'chat') {
       navigation.navigate('Chat', params);
     } else if (actionType === 'call') {
+      // Notify advocate that client is starting a call
+      const socket = getSocket();
+      if (socket && params.bookingId) {
+        socket.emit('initiate_call', {
+          bookingId: params.bookingId,
+          zegoRoomId: params.zegoRoomId,
+          mode: params.mode || 'video',
+        });
+      }
       navigation.navigate('VideoCall', params);
     }
   };
@@ -162,16 +294,23 @@ export default function MyBookingsScreen({ navigation }) {
 
     if (!isConfirmed || !item.advocate) return null;
 
-    const slotText = item.notes?.replace('Preferred slot: ', '') || (item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null);
+    // Use booking.date if set, else fall back to notes
+    const scheduledDate = item.date ? new Date(item.date) : null;
+    const slotText = scheduledDate
+      ? scheduledDate.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : item.notes?.replace('Preferred slot: ', '') || null;
 
     return (
       <View style={{ gap: 10, marginTop: 4 }}>
+        {/* Scheduled slot banner */}
         {slotText && (
           <View style={styles.slotBanner}>
-            <Ionicons name="time-outline" size={14} color="#8D7865" />
-            <Text style={styles.slotBannerText}>Scheduled Slot: {slotText}</Text>
+            <Ionicons name="calendar-outline" size={14} color="#047857" />
+            <Text style={styles.slotBannerText}>Scheduled: {slotText}</Text>
           </View>
         )}
+
+        {/* Chat / Call buttons */}
         <View style={styles.actionsRow}>
           {item.chat && (
             <TouchableOpacity style={styles.chatBtn}
@@ -195,24 +334,36 @@ export default function MyBookingsScreen({ navigation }) {
             <TouchableOpacity
               style={[styles.callBtn, mode === 'video' ? styles.videoBtn : styles.voiceBtn]}
               onPress={() => handleOpenSession('call', item, {
-                zegoRoomId:   item.videoRoomId,
-                zegoToken:    item.videoRoomToken,
-                zegoAppId:    item.zegoAppId || parseInt(process.env.EXPO_PUBLIC_ZEGO_APP_ID || '0'),
-                zegoAppSign:  process.env.EXPO_PUBLIC_ZEGO_APP_SIGN || '',
+                zegoRoomId:     item.videoRoomId,
+                zegoToken:      item.videoRoomToken,
+                zegoAppId:      item.zegoAppId || 0,
                 advocateName,
-                myUserId:     userData._id || '',
-                myUserName:   userData.name || 'Client',
+                myUserId:       userData._id || '',
+                myUserName:     userData.name || 'Client',
                 mode,
-                bookingId:    item._id,
+                bookingId:      item._id,
+                advocateUserId: item.advocate?.user?._id || item.advocate?._id || null,
               })}>
               <Ionicons name={mode === 'video' ? 'videocam-outline' : 'call-outline'} size={17} color="#FFFFFF" />
               <Text style={styles.callBtnText}>{mode === 'video' ? 'Video Call' : 'Voice Call'}</Text>
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Schedule Slot Button */}
+        <TouchableOpacity
+          style={styles.scheduleBtn}
+          onPress={() => setScheduleBooking(item)}
+        >
+          <Ionicons name="calendar-outline" size={16} color="#047857" />
+          <Text style={styles.scheduleBtnText}>
+            {item.date ? '\uD83D\uDCC5 Reschedule Slot' : '\uD83D\uDCC5 Schedule Slot'}
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   };
+
 
   const renderBookingCard = ({ item }) => {
     const config = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
@@ -436,6 +587,22 @@ export default function MyBookingsScreen({ navigation }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchBookings(true)} colors={['#B89A6A']} tintColor="#B89A6A" />}
         />
       )}
+
+      {/* ── Schedule Slot Modal ── */}
+      {scheduleBooking && (
+        <ScheduleModal
+          visible={!!scheduleBooking}
+          booking={scheduleBooking}
+          onClose={() => setScheduleBooking(null)}
+          onConfirm={(chosenDate) => {
+            // Update local booking so banner appears immediately
+            setBookings(prev => prev.map(b =>
+              b._id === scheduleBooking._id ? { ...b, date: chosenDate.toISOString() } : b
+            ));
+            setScheduleBooking(null);
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -525,6 +692,12 @@ const styles = StyleSheet.create({
   voiceBtn: { backgroundColor: '#10B981' },
   videoBtn: { backgroundColor: '#8D7865' },
   callBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  scheduleBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 9, borderRadius: 12,
+    backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0',
+  },
+  scheduleBtnText: { fontSize: 13, fontWeight: '700', color: '#047857' },
   waitingBox: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#FFFBEB', borderRadius: 12, paddingVertical: 12, gap: 8,
@@ -544,3 +717,75 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });
+
+// ─── Schedule Modal Styles ────────────────────────────────────────────────────
+const schedStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingBottom: 36,
+    paddingTop: 12,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  sheetPill: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: '#E2E8F0', marginBottom: 14,
+  },
+  sheetTitle: {
+    fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 4,
+  },
+  sheetSubtitle: {
+    fontSize: 13, color: '#64748B', textAlign: 'center',
+  },
+  sectionLabel: {
+    fontSize: 11, fontWeight: '700', color: '#94A3B8',
+    letterSpacing: 1.2, paddingHorizontal: 24, marginBottom: 10, marginTop: 16,
+  },
+  dayScroll: { flexGrow: 0 },
+  dayChip: {
+    width: 66, alignItems: 'center', paddingVertical: 12,
+    borderRadius: 16, backgroundColor: '#F8FAFC',
+    borderWidth: 1.5, borderColor: '#E2E8F0',
+  },
+  dayChipActive: { backgroundColor: '#0F172A', borderColor: '#0F172A' },
+  dayName: { fontSize: 11, fontWeight: '600', color: '#64748B', marginBottom: 4 },
+  dayNameActive: { color: '#94A3B8' },
+  dayNum: { fontSize: 22, fontWeight: '800', color: '#0F172A' },
+  dayNumActive: { color: '#FFFFFF' },
+  dayMonth: { fontSize: 10, fontWeight: '600', color: '#94A3B8', marginTop: 2 },
+  dayMonthActive: { color: '#64748B' },
+  timeGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    paddingHorizontal: 20, gap: 8, marginBottom: 20,
+  },
+  timeChip: {
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderRadius: 12, backgroundColor: '#F8FAFC',
+    borderWidth: 1.5, borderColor: '#E2E8F0',
+  },
+  timeChipActive: { backgroundColor: '#14B8A6', borderColor: '#14B8A6' },
+  timeLabel: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  timeLabelActive: { color: '#FFFFFF', fontWeight: '700' },
+  confirmBtn: {
+    marginHorizontal: 20, height: 54, borderRadius: 16,
+    backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center',
+  },
+  confirmBtnDisabled: { opacity: 0.4 },
+  confirmBtnText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
+});
+

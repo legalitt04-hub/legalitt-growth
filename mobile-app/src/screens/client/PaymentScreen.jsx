@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { paymentAPI, bookingAPI } from '../../services/api';
+import RazorpayCheckout from 'react-native-razorpay';
 
 const PaymentScreen = ({ navigation, route }) => {
   const { isAuthenticated } = useAuth();
@@ -66,7 +67,7 @@ const PaymentScreen = ({ navigation, route }) => {
     setLoading(true);
     setStep('processing');
     try {
-      // ── Step 1: Create Razorpay order on backend ──────────────────────────
+      // ── Step 1: Create Razorpay order on backend ────────────────────────────
       const orderRes = await paymentAPI.createOrder(bookingId);
       if (!orderRes.data?.success) {
         throw new Error('Failed to create payment order. Please try again.');
@@ -74,36 +75,60 @@ const PaymentScreen = ({ navigation, route }) => {
 
       const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
 
-      // ── Step 2: In production, open Razorpay payment sheet here ───────────
-      // RazorpayCheckout.open({ key: keyId, order_id: orderId, ... })
-      // For development: use test IDs that bypass the HMAC check on dev backend
-      const isDev = __DEV__;
-      const razorpay_payment_id = isDev
-        ? 'pay_dev_' + Math.random().toString(36).substring(2, 11)
-        : null; // production: received from RazorpayCheckout.open success callback
+      let razorpay_payment_id, razorpay_signature, razorpay_order_id;
 
-      // If not dev and no real payment ID, exit (payment sheet not implemented yet)
-      if (!razorpay_payment_id) {
-        setLoading(false);
-        setStep('select');
-        Alert.alert('Coming Soon', 'Live payment gateway will be enabled soon.');
-        return;
+      if (__DEV__) {
+        // ── DEV MODE: bypass real payment for testing ──────────────────────
+        razorpay_payment_id = 'pay_dev_' + Math.random().toString(36).substring(2, 11);
+        razorpay_order_id   = orderId;
+        razorpay_signature  = 'dev_bypass';
+      } else {
+        // ── PRODUCTION: open real Razorpay payment sheet ───────────────────
+        setStep('processing');
+        const paymentData = await RazorpayCheckout.open({
+          key: keyId,
+          order_id: orderId,
+          amount: orderAmount,       // in paise (already from backend)
+          currency: currency || 'INR',
+          name: 'Legalitt Legal Services',
+          description: `Consultation with ${advocateName || 'Advocate'}`,
+          image: 'https://legalitt-growth.onrender.com/logo.png',
+          prefill: {
+            name: user?.name || '',
+            email: user?.email || '',
+          },
+          notes: { bookingId },
+          theme: { color: '#14B8A6' },
+          modal: {
+            ondismiss: () => {
+              setLoading(false);
+              setStep('select');
+            },
+          },
+        });
+
+        razorpay_payment_id = paymentData.razorpay_payment_id;
+        razorpay_order_id   = paymentData.razorpay_order_id;
+        razorpay_signature  = paymentData.razorpay_signature;
       }
 
       setStep('verifying');
 
-      // ── Step 3: Verify HMAC signature on backend ──────────────────────────
+      // ── Step 3: Verify HMAC signature on backend + create chat + Zego room ───
       const verifyRes = await paymentAPI.verifyPayment({
-        razorpay_order_id: orderId,
+        razorpay_order_id,
         razorpay_payment_id,
-        // In dev, backend accepts any signature when NODE_ENV=development
-        razorpay_signature: isDev ? 'dev_bypass' : null,
+        razorpay_signature,
         bookingId,
       });
 
       if (verifyRes.data?.success) {
-        const updatedBooking = verifyRes.data?.data?.booking;
-        const chatId = updatedBooking?.chat;
+        const respData = verifyRes.data?.data || {};
+        const updatedBooking = respData.booking;
+        const chatId    = updatedBooking?.chat || respData.chatId;
+        const zegoRoomId = updatedBooking?.videoRoomId || respData.zegoRoomId || null;
+        const zegoToken  = updatedBooking?.videoRoomToken || respData.zegoToken || null;
+        const zegoAppId  = updatedBooking?.zegoAppId || respData.zegoAppId || 0;
 
         navigation.replace('PaymentSuccess', {
           amount: totalAmount,
@@ -113,11 +138,20 @@ const PaymentScreen = ({ navigation, route }) => {
           advocateAvatar,
           advocateId,
           bookingId,
+          zegoRoomId,
+          zegoToken,
+          zegoAppId,
         });
       } else {
         throw new Error('Payment verification failed. Contact support if amount was deducted.');
       }
     } catch (error) {
+      // User dismissed Razorpay modal — not an error
+      if (error?.code === 'PAYMENT_CANCELLED' || error?.description?.includes('cancel')) {
+        setLoading(false);
+        setStep('select');
+        return;
+      }
       const msg =
         error.response?.data?.message ||
         error.message ||

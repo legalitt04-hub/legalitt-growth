@@ -5,6 +5,7 @@ const { Chat } = require('../models/Chat');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../utils/logger');
 const { createNotification } = require('../utils/notificationHelper');
+const { setupZegoCall } = require('../services/zegoService');
 
 // POST /api/bookings
 exports.createBooking = async (req, res, next) => {
@@ -121,6 +122,29 @@ exports.confirmPayment = async (req, res, next) => {
     booking.payment.razorpayPaymentId = razorpayPaymentId;
     booking.payment.paidAt = new Date();
     booking.chat = chat._id;
+
+    // ─── Generate ZEGOCLOUD tokens for video/voice calls ────────────────────
+    try {
+      const advocate = await Advocate.findById(booking.advocate);
+      if (advocate) {
+        const zegoResult = setupZegoCall({
+          bookingId: booking._id.toString(),
+          clientId:   req.user._id.toString(),
+          advocateId: advocate.user.toString(),
+        });
+        if (zegoResult.success) {
+          booking.videoRoomId     = zegoResult.roomId;
+          booking.videoRoomToken  = zegoResult.clientToken;   // Client token
+          booking.advocateVideoToken = zegoResult.advocateToken; // Advocate token
+          booking.zegoAppId       = zegoResult.appId;
+          logger.info(`[Zego] Room ${zegoResult.roomId} created for booking ${booking._id}`);
+        }
+      }
+    } catch (zegoErr) {
+      // Non-fatal — chat still works, just no call
+      logger.warn(`[Zego] Token generation failed for booking ${booking._id}: ${zegoErr.message}`);
+    }
+
     await booking.save();
 
     // Notify Advocate in real-time
@@ -146,7 +170,16 @@ exports.confirmPayment = async (req, res, next) => {
       relatedId: booking._id,
     });
 
-    res.json({ success: true, data: { booking, chatId: chat._id } });
+    res.json({
+      success: true,
+      data: {
+        booking,
+        chatId: chat._id,
+        zegoRoomId:  booking.videoRoomId   || null,
+        zegoToken:   booking.videoRoomToken || null,
+        zegoAppId:   booking.zegoAppId     || 0,
+      },
+    });
   } catch (err) { next(err); }
 };
 
@@ -196,6 +229,7 @@ exports.getAdvocateBookings = async (req, res, next) => {
     const [bookings, total] = await Promise.all([
       Booking.find(filter)
         .populate('client', 'name avatar phone email isEmailVerified isPhoneVerified isVerified city')
+        .select('+videoRoomId +advocateVideoToken +zegoAppId +chat +payment +status +consultationMode +type')
         .sort({ date: -1 }).skip(skip).limit(Number(limit)).lean(),
       Booking.countDocuments(filter),
     ]);
@@ -280,3 +314,60 @@ exports.getBooking = async (req, res, next) => {
     res.json({ success: true, data: booking });
   } catch (err) { next(err); }
 };
+
+// ─── PATCH /api/bookings/:id/schedule ─────────────────────────────────────────
+// Client selects a preferred time slot for their confirmed booking
+exports.scheduleSlot = async (req, res, next) => {
+  try {
+    const { scheduledAt } = req.body; // ISO datetime string
+    if (!scheduledAt) return next(new AppError('scheduledAt datetime is required.', 400));
+
+    const slotDate = new Date(scheduledAt);
+    if (isNaN(slotDate.getTime())) return next(new AppError('Invalid datetime format.', 400));
+    if (slotDate < new Date()) return next(new AppError('Scheduled time must be in the future.', 400));
+
+    const booking = await Booking.findById(req.params.id)
+      .populate({ path: 'advocate', populate: { path: 'user', select: 'name expoPushToken fcmToken' } })
+      .populate('client', 'name');
+    if (!booking) return next(new AppError('Booking not found.', 404));
+    if (booking.client._id.toString() !== req.user._id.toString())
+      return next(new AppError('Not authorized.', 403));
+    if (!['confirmed', 'pending'].includes(booking.status))
+      return next(new AppError('Only confirmed or pending bookings can be scheduled.', 400));
+
+    // Save scheduled slot
+    booking.date = slotDate;
+    booking.timeSlot = {
+      startTime: slotDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      endTime: new Date(slotDate.getTime() + 60 * 60000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+    };
+    await booking.save();
+
+    // Notify advocate via socket
+    try {
+      const { getIO } = require('../config/socket');
+      const io = getIO();
+      if (booking.advocate?.user?._id) {
+        io.to(`user:${booking.advocate.user._id}`).emit('slot_scheduled', {
+          bookingId: booking._id,
+          clientName: booking.client.name,
+          scheduledAt: slotDate.toISOString(),
+          mode: booking.consultationMode,
+        });
+      }
+    } catch (_) { /* socket may not be initialized in test env */ }
+
+    // Push notification to advocate
+    await createNotification({
+      recipientId: booking.advocate?.user?._id,
+      senderId: req.user._id,
+      title: '📅 Consultation Scheduled',
+      message: `${booking.client.name} scheduled a ${booking.consultationMode} consultation for ${slotDate.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}.`,
+      type: 'booking_confirmed',
+      relatedId: booking._id,
+    });
+
+    res.json({ success: true, data: booking, message: 'Slot scheduled successfully.' });
+  } catch (err) { next(err); }
+};
+

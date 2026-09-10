@@ -193,9 +193,7 @@ const AdvocateDashboardScreen = ({ navigation }) => {
 
       Alert.alert(
         `${emoji} New Case Assigned!`,
-        `${data.client?.name || 'A client'} needs ${data.consultationMode} consultation.
-
-"${(data.issue || '').substring(0, 80)}${(data.issue || '').length > 80 ? '...' : ''}"`,
+        `${data.client?.name || 'A client'} needs ${data.consultationMode} consultation.\n\n"${(data.issue || '').substring(0, 80)}${(data.issue || '').length > 80 ? '...' : ''}"`,
         [
           { text: 'Later', style: 'cancel' },
           {
@@ -212,10 +210,15 @@ const AdvocateDashboardScreen = ({ navigation }) => {
                 navigation.navigate('AdvocateCall', {
                   clientName:   data.client?.name || 'Client',
                   clientAvatar: data.client?.avatar,
-                  callType:     data.consultationMode,
+                  mode:         data.consultationMode,
                   bookingId:    data.bookingId,
                   clientId:     data.client?._id,
-                  isIncoming:   false,
+                  // Zego credentials from admin assignment notification
+                  zegoRoomId:   data.zegoRoomId    || data.videoRoomId    || null,
+                  zegoToken:    data.advocateToken || data.advocateVideoToken || null,
+                  zegoAppId:    data.zegoAppId     || 0,
+                  myUserId:     advocateUser._id   || advocateUser.id || '',
+                  myUserName:   advocateUser.name  || 'Advocate',
                 });
               }
             },
@@ -230,10 +233,14 @@ const AdvocateDashboardScreen = ({ navigation }) => {
       navigation.navigate('AdvocateCall', {
         clientName:   callData?.client?.name || callData?.clientName || 'Client',
         clientAvatar: callData?.client?.avatar || callData?.avatar || null,
-        callType:     callData?.callType || callData?.mode || 'video',
+        mode:         callData?.callType || callData?.mode || 'video',
         bookingId:    callData?.bookingId,
         clientId:     callData?.clientId || callData?.client?._id,
-        isIncoming:   true,
+        zegoRoomId:   callData?.zegoRoomId   || callData?.videoRoomId   || null,
+        zegoToken:    callData?.advocateToken || callData?.advocateVideoToken || null,
+        zegoAppId:    callData?.zegoAppId    || 0,
+        myUserId:     advocateUser._id || advocateUser.id || '',
+        myUserName:   advocateUser.name || 'Advocate',
       });
     };
 

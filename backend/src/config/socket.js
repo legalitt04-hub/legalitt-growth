@@ -4,6 +4,8 @@ const logger = require("../utils/logger");
 const Message = require("../models/Message");
 const { Chat } = require("../models/Chat");
 const User = require("../models/User");
+const Booking = require("../models/Booking");
+const Advocate = require("../models/Advocate");
 const { sendPushNotification } = require("../utils/pushNotification");
 
 let io;
@@ -202,6 +204,72 @@ const initSocket = async (server) => {
           });
         }
       } catch (err) { logger.error("mark_read:", err.message); }
+    });
+
+    // ── CALL SIGNALING ─────────────────────────────────────────────────
+    // Client emits this when they tap "Video Call" / "Voice Call"
+    // Backend finds advocate from booking, emits incoming_call to them
+    socket.on("initiate_call", async ({ bookingId, zegoRoomId, mode }) => {
+      try {
+        if (!bookingId) return;
+        const booking = await Booking.findById(bookingId)
+          .select('advocate client videoRoomId advocateVideoToken zegoAppId')
+          .lean();
+        if (!booking) return;
+
+        // Verify caller is the booking's client
+        if (booking.client.toString() !== socket.userId) return;
+
+        const advocate = await Advocate.findById(booking.advocate)
+          .populate('user', 'name expoPushToken fcmToken')
+          .lean();
+        if (!advocate?.user) return;
+
+        const advocateUserId = advocate.user._id.toString();
+        const callerUser = await User.findById(socket.userId).select('name avatar').lean();
+
+        // Notify advocate — they will open AdvocateCallScreen
+        io.to(`user:${advocateUserId}`).emit("incoming_call", {
+          bookingId,
+          zegoRoomId:    booking.videoRoomId    || zegoRoomId,
+          advocateToken: booking.advocateVideoToken,
+          zegoAppId:     booking.zegoAppId || 0,
+          clientName:    callerUser?.name || 'Client',
+          clientAvatar:  callerUser?.avatar || null,
+          clientId:      socket.userId,
+          mode:          mode || 'video',
+        });
+
+        logger.info(`[CALL] initiate_call: client=${socket.userId} → advocate=${advocateUserId} | booking=${bookingId}`);
+
+        // Push notification if advocate is offline
+        const isAdvocateOnline = onlineUsers.has(advocateUserId) && onlineUsers.get(advocateUserId).size > 0;
+        if (!isAdvocateOnline && advocate.user.expoPushToken) {
+          await sendPushNotification(
+            advocate.user.expoPushToken,
+            `\uD83D\uDCDE Incoming ${mode === 'video' ? 'Video' : 'Voice'} Call`,
+            `${callerUser?.name || 'Your client'} is calling. Tap to join.`,
+            { bookingId, type: 'incoming_call', zegoRoomId: booking.videoRoomId }
+          );
+        }
+      } catch (err) {
+        logger.error("initiate_call error:", err.message);
+      }
+    });
+
+    // Either party can emit this to notify the other that call ended
+    socket.on("call_ended", ({ bookingId, clientId, advocateUserId }) => {
+      try {
+        if (clientId && clientId !== socket.userId) {
+          io.to(`user:${clientId}`).emit("call_ended", { bookingId });
+        }
+        if (advocateUserId && advocateUserId !== socket.userId) {
+          io.to(`user:${advocateUserId}`).emit("call_ended", { bookingId });
+        }
+        logger.info(`[CALL] call_ended: emitter=${socket.userId} booking=${bookingId}`);
+      } catch (err) {
+        logger.error("call_ended error:", err.message);
+      }
     });
 
     // ── DISCONNECT ─────────────────────────────────────────────

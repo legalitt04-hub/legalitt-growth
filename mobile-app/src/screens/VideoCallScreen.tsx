@@ -5,6 +5,7 @@ import ZegoUIKitPrebuiltCallComponent, {
   ONE_ON_ONE_VIDEO_CALL_CONFIG,
   ONE_ON_ONE_VOICE_CALL_CONFIG,
 } from '@zegocloud/zego-uikit-prebuilt-call-rn';
+import { getSocket } from '../services/socket';
 
 const ZegoUIKitPrebuiltCall: any = ZegoUIKitPrebuiltCallComponent;
 const { ZEGO_APP_ID, ZEGO_APP_SIGN } = Constants.expoConfig?.extra || {};
@@ -13,10 +14,12 @@ export default function VideoCallScreen({ navigation, route }: any) {
   const {
     zegoRoomId,
     zegoToken,
-    advocateName  = 'Advocate',
-    myUserId      = '',
-    myUserName    = 'User',
-    mode          = 'video',
+    advocateName = 'Advocate',
+    myUserId = '',
+    myUserName = 'User',
+    mode = 'video',
+    bookingId,
+    advocateUserId,
   } = route?.params || {};
 
   useEffect(() => {
@@ -29,6 +32,15 @@ export default function VideoCallScreen({ navigation, route }: any) {
     }
   }, []);
 
+  // Listen for advocate hanging up — close screen on client side too
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = () => navigation.goBack();
+    socket.on('call_ended', handler);
+    return () => socket.off('call_ended', handler);
+  }, []);
+
   if (!zegoRoomId || !zegoToken || !ZEGO_APP_ID) {
     return (
       <View style={styles.container}>
@@ -37,6 +49,18 @@ export default function VideoCallScreen({ navigation, route }: any) {
       </View>
     );
   }
+
+  const handleHangUp = () => {
+    // Notify advocate that client hung up
+    const socket = getSocket();
+    if (socket && bookingId) {
+      socket.emit('call_ended', {
+        bookingId,
+        advocateUserId: advocateUserId || null,
+      });
+    }
+    navigation.goBack();
+  };
 
   const callConfig = mode === 'video'
     ? {
@@ -69,7 +93,7 @@ export default function VideoCallScreen({ navigation, route }: any) {
         token={zegoToken}
         config={{
           ...callConfig,
-          onHangUp: () => navigation.goBack(),
+          onHangUp: handleHangUp,
         }}
       />
     </View>

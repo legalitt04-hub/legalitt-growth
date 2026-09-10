@@ -99,25 +99,43 @@ const EarningsScreen = ({ navigation }) => {
   useEffect(() => { fetchAll(); }, [fetchAll]);
   const onRefresh = async () => { setRefreshing(true); await fetchAll(); setRefreshing(false); };
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
     if ((balance?.available || 0) < 100) {
       Alert.alert('Insufficient Balance', 'Minimum withdrawal is ₹100.');
       return;
     }
+
+    // Fetch saved bank details first
+    let bankDetails = null;
+    try {
+      const walletRes = await api.get('/wallet');
+      const walletData = walletRes.data?.data || walletRes.data || {};
+      bankDetails = walletData.bankDetails || null;
+    } catch (e) {
+      console.log('Could not fetch bank details:', e.message);
+    }
+
+    if (!bankDetails?.accountNumber) {
+      Alert.alert(
+        'Bank Details Required',
+        'Please save your bank account details in My Wallet before requesting a withdrawal.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Go to Wallet', onPress: () => navigation.navigate('AdvocateWallet') },
+        ]
+      );
+      return;
+    }
+
     Alert.alert(
       'Withdraw Funds',
-      `Available: ${formatINR(balance.available)}\n\nAmount will be credited to your registered bank account in 2-3 business days.`,
+      `Available: ${formatINR(balance.available)}\n\nTransfer to: ${bankDetails.bankName} - \u2022\u2022\u2022\u2022${bankDetails.accountNumber.slice(-4)}\n\nAmount will be credited within 2-3 business days.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Confirm', onPress: async () => {
           setWithdraw(true);
           try {
-            await api.post('/wallet/withdraw', {
-              amount: balance.available,
-              bankAccount: 'XXXXXXXX',
-              ifscCode: 'SBIN0000000',
-              accountName: 'Advocate',
-            });
+            await api.post('/wallet/withdraw', { amount: balance.available });
             Alert.alert('Request Submitted', 'Funds will be credited in 2-3 business days.');
             fetchAll();
           } catch (e) {

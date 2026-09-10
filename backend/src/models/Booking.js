@@ -99,11 +99,12 @@ const bookingSchema = new mongoose.Schema({
   // ─── Document Forensic Fields ─────────────────────────────────────────────
   documentName: String,
   documentType: String,
-  // Video/Voice call room (Daily.co)
+  // Video/Voice call room (ZEGOCLOUD)
   videoRoomId: String,
   videoRoomUrl: String,
   videoRoomToken: String,      // Client token
   advocateVideoToken: String,  // Advocate token
+  zegoAppId: Number,           // ZEGOCLOUD App ID (stored so client/advocate don't need .env)
   videoRoomExpiresAt: Date,
   // Chat
   chat: {

@@ -413,11 +413,14 @@ const AppNavigator = () => {
               <Stack.Screen name="Settings" component={SettingsScreen} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
               
-              <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
+              <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
               <Stack.Screen name="LoginRegister" component={LoginRegisterScreen} />
               <Stack.Screen name="OTP" component={OTPScreen} />
               <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
               <Stack.Screen name="AdvocateFlow" component={AdvocateStack} />
+              {/* Advocate registration completion screens — needed when user registers as advocate */}
+              <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
+              <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
               <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
               <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
               <Stack.Screen name="DataDeletion" component={DataDeletionScreen} />

@@ -29,10 +29,10 @@ export default function RoleSelectScreen({ navigation }) {
   const handleNext = async () => {
     if (!role) return;
     if (role === 'advocate') {
-      // Advocate → go to login/register with advocate role
-      navigation.replace('LoginRegister', { role: 'advocate' });
+      // Advocate → dedicated advocate login/register flow
+      navigation.navigate('AdvocateFlow');
     } else {
-      // Client → save role, go to client home as guest
+      // Client → go directly to client home as guest (login optional)
       await AsyncStorage.setItem('legalitt_role', 'client');
       navigation.replace('ClientMain');
     }

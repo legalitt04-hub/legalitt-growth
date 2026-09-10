@@ -348,7 +348,9 @@ exports.verifyOTP = async (req, res, next) => {
     if (!phone && !email) return next(new AppError('Phone or email is required.', 400));
 
     let user;
-    const isTestOTP = otp === '123456' || otp === '000000' || otp === '1234';
+    // Test OTP bypass — ONLY allowed in non-production environments
+    const isTestOTP = process.env.NODE_ENV !== 'production' &&
+      (otp === '123456' || otp === '000000' || otp === '1234');
     if (phone) {
       user = await User.findOne({ phone }).select('+phoneOTP +phoneOTPExpires');
       if (!user || (!isTestOTP && (user.phoneOTP !== otp || !user.phoneOTPExpires || user.phoneOTPExpires < Date.now()))) {

@@ -174,7 +174,7 @@ const LoginRegisterScreen = ({ navigation, route }) => {
       }
 
       // Send idToken to Legalitt backend for verification + JWT issue
-      const userRole = role === 'advocate' ? 'advocate' : 'client';
+      const userRole = selectedRole === 'advocate' ? 'advocate' : 'client';
       const response = await googleLogin(idToken, userRole);
 
       if (!response.success) {

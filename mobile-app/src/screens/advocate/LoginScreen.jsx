@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { advocateAPI } from '../../services/api';
 import { COLORS } from '../../constants/theme';
 import { sanitizeInput } from '../../utils/security';
-import { GoogleSignin, statusCodes } from '../../utils/GoogleSigninMock';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');

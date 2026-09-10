@@ -212,7 +212,7 @@ export const authAPI = {
   }),
   refreshToken: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
   logout: (refreshToken) => api.post('/auth/logout', { refreshToken }),
-  getMe: () => api.get('/users/me'),
+  getMe: () => api.get('/auth/me'),
   deleteAccount: () => api.delete('/users/me'),
   sendOTP: (email) => api.post('/auth/send-otp', { email }),
   verifyOTP: (email, otp, role) => api.post('/auth/verify-otp', { email, otp, role }),

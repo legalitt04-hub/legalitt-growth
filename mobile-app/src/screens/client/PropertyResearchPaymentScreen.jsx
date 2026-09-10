@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SHADOWS } from '../../constants/theme';
 import { legalAdviceAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import RazorpayCheckout from 'react-native-razorpay';
+import Constants from 'expo-constants';
 
 const PRIMARY_BEIGE = '#C2A98B';
 
@@ -37,7 +39,6 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
   const requestId = '#PR-' + Math.floor(100000 + Math.random() * 900000);
 
   const handlePayAndStart = async () => {
-    // Auth gate
     if (!isAuthenticated) {
       Alert.alert(
         '🔐 Login Required',
@@ -52,7 +53,30 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
 
     setProcessing(true);
     try {
-      // Save to backend — same flow as Legal Advice/Notice
+      const RAZORPAY_KEY = Constants.expoConfig?.extra?.RAZORPAY_KEY_ID || 'rzp_test_SeC9MGzYmAerqz';
+      const AMOUNT_PAISE = 299900; // ₹2,999 in paise
+
+      let paymentId;
+
+      if (__DEV__) {
+        // Dev bypass
+        paymentId = 'pay_dev_pr_' + Math.random().toString(36).substring(2, 9);
+      } else {
+        // Real Razorpay payment
+        const paymentData = await RazorpayCheckout.open({
+          key: RAZORPAY_KEY,
+          amount: AMOUNT_PAISE,
+          currency: 'INR',
+          name: 'Legalitt Legal Services',
+          description: 'Property Research & Title Verification Report',
+          prefill: { name: user?.name || '', email: user?.email || '' },
+          notes: { requestId, serviceType: 'property_research' },
+          theme: { color: '#C2A98B' },
+        });
+        paymentId = paymentData.razorpay_payment_id;
+      }
+
+      // Save to backend
       await legalAdviceAPI.createRequest({
         serviceType: 'property_research',
         consultationMode: 'chat',
@@ -63,17 +87,23 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
         requestId,
         propertyData,
         paymentMethod: selectedMethod,
+        razorpayPaymentId: paymentId,
       });
-    } catch (err) {
-      console.log('Property research request note:', err?.message);
-    } finally {
-      setProcessing(false);
+
       navigation.replace('PropertyResearchSuccess', {
         paymentStatus: 'SUCCESS',
         requestId,
         propertyData,
         amountPaid: '2,999',
       });
+    } catch (err) {
+      if (err?.code === 'PAYMENT_CANCELLED' || err?.description?.includes('cancel')) {
+        return; // User dismissed — not an error
+      }
+      console.log('Property research payment error:', err?.message);
+      Alert.alert('Payment Failed', err?.message || 'Please try again.');
+    } finally {
+      setProcessing(false);
     }
   };
 

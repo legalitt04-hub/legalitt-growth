@@ -11,7 +11,12 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Each box: 6 boxes + 5 gaps of 10px each, with 48px horizontal padding
+const OTP_BOX_SIZE = Math.min(52, Math.floor((SCREEN_WIDTH - 48 - 5 * 10) / 6));
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
@@ -397,17 +402,19 @@ const styles = StyleSheet.create({
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 32,
+    paddingHorizontal: 4,
   },
   otpInput: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
+    width: OTP_BOX_SIZE,
+    height: OTP_BOX_SIZE,
+    borderRadius: 14,
     borderWidth: 2,
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
-    fontSize: 24,
+    fontSize: Math.floor(OTP_BOX_SIZE * 0.42),
     fontWeight: '600',
     textAlign: 'center',
     color: '#1F2937',

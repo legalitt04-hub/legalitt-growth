@@ -12,33 +12,39 @@ const GOOGLE_SIGNIN = path.resolve(__dirname, 'src/utils/GoogleSigninMock.js');
 
 // ─── Platform-aware module resolver ──────────────────────────────────────────
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  // When building standalone APK on EAS, use real native packages instead of mocks
+  // ─── EAS Production Build: use ALL real native packages ─────────────────────
+  // When EAS builds the app (not Expo Go), native modules are properly linked.
   if (process.env.EAS_BUILD === 'true') {
+    // Only stub KeepAwake (not linked in EAS either)
+    if (moduleName === '@sayem314/react-native-keep-awake') {
+      return { type: 'sourceFile', filePath: KEEP_AWAKE };
+    }
     return context.resolveRequest(context, moduleName, platform);
   }
 
-  // Only in Expo Go & Web: stub native TurboModules that are not present in Expo Go client
+  // ─── Expo Go / Web: stub native TurboModules not present in Expo Go ──────────
+
+  // Google Sign-In — requires native TurboModule, not in Expo Go
   if (moduleName.includes('@react-native-google-signin/google-signin')) {
     return { type: 'sourceFile', filePath: GOOGLE_SIGNIN };
   }
 
-  // Always stub KeepAwake — TurboModule 'ReactNativeKCKeepAwake' is not
-  // present in Expo Go on any platform (android, ios, or web).
+  // KeepAwake — not present in Expo Go on any platform
   if (moduleName === '@sayem314/react-native-keep-awake') {
     return { type: 'sourceFile', filePath: KEEP_AWAKE };
   }
 
-  // Always stub react-native-sound — not linked in Expo Go
+  // react-native-sound — not linked in Expo Go
   if (moduleName === 'react-native-sound') {
     return { type: 'sourceFile', filePath: SOUND };
   }
 
-  // Always stub Razorpay — not linked in Expo Go
+  // react-native-razorpay — not linked in Expo Go (native module)
   if (moduleName === 'react-native-razorpay') {
     return { type: 'sourceFile', filePath: RAZORPAY };
   }
 
-  // Always stub Zego — native-only SDK, not in Expo Go
+  // Zego — native-only SDK, not in Expo Go
   if (
     moduleName.includes('zego-express-engine') ||
     moduleName.includes('zego-zim') ||
