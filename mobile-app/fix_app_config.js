@@ -1,10 +1,5 @@
 const fs = require('fs');
-const path = './app.config.js';
-let content = fs.readFileSync(path, 'utf-8');
-
-content = content.replace(/owner:\s*"legalittgrowths-organization",\n?/g, '');
-content = content.replace(/\/\/ EAS Project linking\s*eas:\s*\{\s*projectId:\s*'[^']+'\s*\}\n?/g, '');
-content = content.replace(/eas:\s*\{\s*projectId:\s*'[^']+'\s*\}\n?/g, '');
-
-fs.writeFileSync(path, content);
+let content = fs.readFileSync('app.config.js', 'utf8');
+content = content.replace(/extra: \{/, "extra: {\n      eas: {\n        projectId: ''\n      },");
+fs.writeFileSync('app.config.js', content);
 console.log('Fixed app.config.js');

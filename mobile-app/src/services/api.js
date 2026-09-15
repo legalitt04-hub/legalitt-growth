@@ -303,7 +303,7 @@ export const legalAdviceAPI = {
   getRequestDetail: (id) => api.get(`/legal-advice/request/${id}`),
 };
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Document Upload to Cloudinary using FileSystem for robust React Native uploads
 export const uploadAPI = {

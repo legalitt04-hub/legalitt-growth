@@ -102,6 +102,9 @@ export default ({ config }) => ({
       "expo-web-browser"
     ],
     extra: {
+      eas: {
+        projectId: '53a94562-25bc-4f1c-af15-ec4c792696dc'
+      },
       API_URL: process.env.API_URL || 'https://legalitt-growth.onrender.com/api/v1',
       SOCKET_URL: process.env.SOCKET_URL || 'https://legalitt-growth.onrender.com',
       GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -112,9 +115,6 @@ export default ({ config }) => ({
       // ZEGOCLOUD — Video/Voice/Chat
       ZEGO_APP_ID: parseInt(process.env.ZEGO_APP_ID || '0', 10),
       ZEGO_APP_SIGN: process.env.ZEGO_APP_SIGN || '',
-      eas: {
-        projectId: 'c7cbf65c-ddc9-4089-afc6-30f135b6d5e8'
-      }
     }
   }
 });

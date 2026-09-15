@@ -1,0 +1,6 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn npx eas init
+expect "Would you like to create a project for"
+send "\r"
+expect eof

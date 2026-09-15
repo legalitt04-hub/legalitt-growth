@@ -32,7 +32,7 @@ const PAYMENT_METHODS = [
 export default function PropertyResearchPaymentScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { propertyData } = route.params || {};
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { getPrice } = usePricing();
 
   const [selectedMethod, setSelectedMethod] = useState('upi');
@@ -181,7 +181,7 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Property Address</Text>
             <Text style={styles.detailValue} numberOfLines={2}>
-              {propertyData?.address || 'Plot 42, Green Avenue, Sector 5, Indore'}
+              {propertyData?.propertyAddress || propertyData?.address || 'N/A'}
             </Text>
           </View>
 
