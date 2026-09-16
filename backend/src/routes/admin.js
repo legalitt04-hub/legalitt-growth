@@ -180,5 +180,14 @@ router.post('/document-forensic/:id/upload',    upload.single('document'), admin
 const pricingController = require('../controllers/pricingController');
 router.put('/pricing/:id', pricingController.updatePrice);
 
+// ─── Legal Notices (Admin) ─────────────────────────────────────────────────────
+router.get('/legal-notices',                     adminModuleController.getLegalNotices);
+router.get('/legal-notices/:id',                 adminModuleController.getLegalNoticeDetail);
+router.put('/legal-notices/:id/status',          adminModuleController.updateLegalNoticeStatus);
+router.post('/legal-notices/:id/upload',         upload.single('document'), adminModuleController.uploadLegalNoticeDocument);
+router.post('/legal-notices/:id/ai-draft',       adminModuleController.generateLegalNoticeAIDraft);
+router.post('/legal-notices/:id/assign',         adminModuleController.assignAdvocateToLegalNotice);
+router.delete('/legal-notices/:id',              adminModuleController.deleteLegalNotice);
+
 module.exports = router;
 

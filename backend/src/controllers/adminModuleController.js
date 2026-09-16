@@ -895,3 +895,206 @@ exports.uploadDocumentForensicReport = async (req, res, next) => {
     next(err);
   }
 };
+
+// ─── Legal Notice Admin ───────────────────────────────────────────────────────
+exports.getLegalNotices = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const { status, page = 1, limit = 20, search } = req.query;
+
+    const filter = { serviceType: 'legal_notice' };
+    if (status && status !== 'all') filter.status = status;
+
+    const skip = (Number(page) - 1) * Number(limit);
+    let query = Booking.find(filter).lean()
+      .populate('client', 'name email phone avatar')
+      .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit));
+
+    const [bookings, total] = await Promise.all([
+      query,
+      Booking.countDocuments(filter),
+    ]);
+
+    // Map to unified interface
+    const mapped = bookings.map(b => ({
+      _id: b._id,
+      caseNumber: `LN-${b._id.toString().slice(-6).toUpperCase()}`,
+      client: b.client,
+      advocate: b.advocate,
+      status: b.status === 'pending_assignment' ? 'open'
+            : b.status === 'confirmed'          ? 'in_progress'
+            : b.status === 'completed'          ? 'resolved'
+            : b.status === 'cancelled'          ? 'closed'
+            : b.status || 'open',
+      serviceType: 'legal_notice',
+      issueDescription: b.issue || b.issueDescription || '',
+      issueCategory: b.issueCategory || '',
+      consultationMode: b.consultationMode || 'chat',
+      payment: b.payment || null,
+      amount: b.amount || 0,
+      documents: b.documents || [],
+      adminDocuments: b.adminDocuments || [],
+      advocateDocuments: b.advocateDocuments || [],
+      aiDraft: b.aiDraft || null,
+      adminNotes: b.adminNotes || '',
+      createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+    }));
+
+    res.json({
+      success: true,
+      data: mapped,
+      pagination: { total, page: Number(page), pages: Math.ceil(total / Number(limit)) },
+    });
+  } catch (err) { next(err); }
+};
+
+exports.getLegalNoticeDetail = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const booking = await Booking.findById(req.params.id).lean()
+      .populate('client', 'name email phone avatar')
+      .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data: booking });
+  } catch (err) { next(err); }
+};
+
+exports.updateLegalNoticeStatus = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    // Map display status → DB status
+    const STATUS_MAP = {
+      open:        'pending_assignment',
+      in_progress: 'confirmed',
+      resolved:    'completed',
+      closed:      'cancelled',
+      pending:     'pending',
+    };
+    const updateData = {};
+    if (req.body.status) updateData.status = STATUS_MAP[req.body.status] || req.body.status;
+    if (req.body.adminNotes !== undefined) updateData.adminNotes = req.body.adminNotes;
+    if (req.body.advocateId !== undefined) updateData.advocate = req.body.advocateId || null;
+
+    const updated = await Booking.findByIdAndUpdate(
+      req.params.id, { $set: updateData }, { new: true }
+    ).populate('client', 'name email phone').populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } });
+
+    if (!updated) return res.status(404).json({ success: false, message: 'Legal notice not found' });
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+};
+
+exports.uploadLegalNoticeDocument = async (req, res, next) => {
+  try {
+    const cloudinary = require('cloudinary').v2;
+    const fs = require('fs');
+    const Booking = require('../models/Booking');
+
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key:    process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+    const isPdf = req.file.mimetype?.includes('pdf') || req.file.originalname?.toLowerCase().endsWith('.pdf');
+    const isImage = req.file.mimetype?.startsWith('image/');
+    const resourceType = isImage ? 'image' : isPdf ? 'raw' : 'auto';
+
+    let result;
+    if (req.file.path) {
+      result = await cloudinary.uploader.upload(req.file.path, { folder: 'legalitt/admin-legal-notices', resource_type: resourceType });
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    } else {
+      result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'legalitt/admin-legal-notices', resource_type: resourceType },
+          (err, res) => err ? reject(err) : resolve(res)
+        );
+        stream.end(req.file.buffer);
+      });
+    }
+
+    const side = req.body.side || 'admin';
+    const docEntry = { url: result.secure_url, name: req.file.originalname, type: isPdf ? 'pdf' : 'image', uploadedAt: new Date() };
+
+    const field = side === 'advocate' ? 'advocateDocuments' : 'adminDocuments';
+    await Booking.findByIdAndUpdate(req.params.id, { $push: { [field]: docEntry } });
+
+    res.json({ success: true, data: { url: result.secure_url, name: req.file.originalname } });
+  } catch (err) {
+    if (req.file?.path) { try { require('fs').unlinkSync(req.file.path); } catch (e) {} }
+    next(err);
+  }
+};
+
+exports.generateLegalNoticeAIDraft = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const { callAI } = require('../services/aiService');
+
+    const booking = await Booking.findById(req.params.id).lean()
+      .populate('client', 'name email');
+    if (!booking) return res.status(404).json({ success: false, message: 'Legal notice not found' });
+
+    const clientName   = booking.client?.name || 'Client';
+    const issueDesc    = booking.issue || booking.issueDescription || 'Legal matter requiring formal response';
+    const issueCategory = booking.issueCategory || 'general';
+    const today        = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const customInstructions = req.body.instructions || '';
+
+    const prompt = `You are a senior Indian advocate drafting a formal legal notice response.
+
+CLIENT: ${clientName}
+ISSUE: ${issueDesc}
+CATEGORY: ${issueCategory}
+DATE: ${today}
+${customInstructions ? `ADDITIONAL INSTRUCTIONS: ${customInstructions}` : ''}
+
+Draft a professional, formal legal notice response in Indian legal format. Include:
+1. Proper heading (RESPONSE TO LEGAL NOTICE)
+2. Date and addressee placeholder
+3. Subject line
+4. Structured numbered paragraphs
+5. Reservation of rights clause
+6. Professional closing
+
+Keep it formal, professional, and legally sound. Use Indian legal conventions.`;
+
+    const draftContent = await callAI([{ role: 'user', content: prompt }]);
+
+    // Save the AI draft to the booking
+    await Booking.findByIdAndUpdate(req.params.id, { $set: { aiDraft: draftContent } });
+
+    res.json({ success: true, data: { draft: draftContent } });
+  } catch (err) { next(err); }
+};
+
+exports.assignAdvocateToLegalNotice = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const { advocateId } = req.body;
+    const updated = await Booking.findByIdAndUpdate(
+      req.params.id,
+      { $set: { advocate: advocateId || null, status: advocateId ? 'confirmed' : 'pending_assignment' } },
+      { new: true }
+    ).populate('client', 'name email').populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } });
+    if (!updated) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+};
+
+exports.deleteLegalNotice = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const deleted = await Booking.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ success: false, message: 'Legal notice not found' });
+    res.json({ success: true, message: 'Legal notice deleted.' });
+  } catch (err) { next(err); }
+};
+

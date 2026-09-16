@@ -119,6 +119,17 @@ const bookingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
   },
+  // Documents uploaded by admin
+  adminDocuments: [mongoose.Schema.Types.Mixed],
+  // AI-generated draft (stored by admin for advocate to use)
+  aiDraft: { type: String },
+  // Admin notes visible to admin team only
+  adminNotes: { type: String },
+  // Issue description (verbose, from booking form)
+  issueDescription: { type: String },
+  issueCategory: { type: String },
+  // Amount (top-level for easy access)
+  amount: { type: Number, default: 0 },
   notes: String,
   internalNotes: [{
     note: { type: String, required: true },

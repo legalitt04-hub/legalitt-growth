@@ -41,6 +41,7 @@ import Transactions from './pages/Transactions';
 import FIRDrafts from './pages/FIRDrafts';
 import PropertyResearch from './pages/PropertyResearch';
 import DocumentForensic from './pages/DocumentForensic';
+import LegalNotices from './pages/LegalNotices';
 import ErrorBoundary from './components/ErrorBoundary';
 import CallHistory from './pages/CallHistory';
 import PricingSettings from './pages/PricingSettings';
@@ -70,6 +71,7 @@ function App() {
             <Route path="/ai-drafts" element={<AIDrafts />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/fir-drafts" element={<FIRDrafts />} />
+            <Route path="/legal-notices" element={<LegalNotices />} />
             <Route path="/property-research" element={<PropertyResearch />} />
             <Route path="/document-forensic" element={<DocumentForensic />} />
             
