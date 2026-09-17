@@ -12,7 +12,7 @@ if (fs.existsSync(envPath)) {
       if (value.startsWith('"') && value.endsWith('"')) {
         value = value.slice(1, -1);
       }
-      process.env[key] = value;
+      if (process.env[key] === undefined) process.env[key] = value;
     }
   });
 }
@@ -107,7 +107,7 @@ export default ({ config }) => ({
       },
       API_URL: process.env.API_URL || 'https://legalitt-growth.onrender.com/api/v1',
       SOCKET_URL: process.env.SOCKET_URL || 'https://legalitt-growth.onrender.com',
-      GOOGLE_WEB_CLIENT_ID: process.env.GOOGLE_WEB_CLIENT_ID,
+      GOOGLE_WEB_CLIENT_ID: '400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com',
       GOOGLE_ANDROID_CLIENT_ID: process.env.GOOGLE_ANDROID_CLIENT_ID,
     }
   }

@@ -23,7 +23,7 @@ exports.getCases = async (req, res, next) => {
     require('../models/Advocate');
     const Booking = require('../models/Booking');
 
-    const bookingFilter = {};
+    const bookingFilter = { 'payment.status': { $in: ['paid', 'not_required'] } };
     if (status) {
       if (status === 'open') bookingFilter.status = { $in: ['open', 'confirmed', 'pending_assignment'] };
       else if (status === 'pending') bookingFilter.status = { $in: ['pending', 'pending_assignment'] };
@@ -552,8 +552,33 @@ exports.getCalendarEvents = async (req, res, next) => {
     const from = req.query.from ? new Date(req.query.from) : new Date(now.getFullYear(), now.getMonth(), 1);
     const to = req.query.to ? new Date(req.query.to) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return next(new AppError('Invalid calendar date range', 400));
+    if (req.query.availabilityDate) {
+      const day = new Date(`${req.query.availabilityDate}T00:00:00+05:30`);
+      if (Number.isNaN(day.getTime())) return next(new AppError('Invalid availability date', 400));
+      const end = new Date(day.getTime() + 86400000);
+      const filter = { verificationStatus: 'approved' };
+      if (req.query.search) {
+        const text = String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const users = await require('../models/User').find({ name: { $regex: text, $options: 'i' } }).select('_id').lean();
+        filter.user = { $in: users.map(user => user._id) };
+      }
+      const profiles = await Advocate.find(filter).select('user availability courtHearings').populate('user', 'name').limit(50).lean();
+      const busy = await Booking.find({ advocate: { $in: profiles.map(a => a._id) }, date: { $gte: day, $lt: end }, status: { $in: ['confirmed', 'in_progress', 'rescheduled'] }, 'payment.status': { $in: ['paid', 'not_required'] } }).select('advocate timeSlot').lean();
+      const weekday = day.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+      const minutes = value => { const parts = String(value || '').match(/^(\d{1,2}):(\d{2})$/); return parts ? Number(parts[1]) * 60 + Number(parts[2]) : null; };
+      const availability = profiles.map(profile => {
+        const reservations = busy.filter(b => String(b.advocate) === String(profile._id));
+        const hearings = (profile.courtHearings || []).filter(h => new Date(h.hearingDate) >= day && new Date(h.hearingDate) < end && !['Cancelled', 'Completed'].includes(h.status));
+        return { id: profile._id, name: profile.user?.name || 'Advocate', slots: (profile.availability || []).filter(a => a.day === weekday).flatMap(a => a.slots || []).map(slot => {
+          const start = minutes(slot.startTime), finish = minutes(slot.endTime);
+          const conflict = reservations.some(b => { const bs = minutes(b.timeSlot?.startTime), be = minutes(b.timeSlot?.endTime); return bs === null || be === null || start === null || finish === null || (start < be && finish > bs); });
+          return { startTime: slot.startTime, endTime: slot.endTime, status: slot.isBooked || conflict ? 'Busy' : hearings.length ? 'Check hearing schedule' : 'Available' };
+        }), hearings: hearings.map(h => ({ title: h.caseTitle, time: h.hearingTime })) };
+      });
+      return res.json({ success: true, data: availability, limit: 50 });
+    }
     const [bookings, cases, advocates] = await Promise.all([
-      Booking.find({ date: { $gte: from, $lte: to }, status: { $ne: 'cancelled' } })
+      Booking.find({ date: { $gte: from, $lte: to }, status: { $nin: ['cancelled', 'pending_payment'] }, 'payment.status': { $in: ['paid', 'not_required'] } })
         .select('date timeSlot consultationMode serviceType status client advocate')
         .populate('client', 'name')
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name' } }).lean(),
@@ -771,7 +796,7 @@ exports.getFIRDrafts = async (req, res, next) => {
         .populate('user', 'name email phone')
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
         .lean(),
-      Booking.find({ serviceType: 'fir_draft' })
+      Booking.find({ serviceType: 'fir_draft', 'payment.status': { $in: ['paid', 'not_required'] } })
         .populate('client', 'name email phone')
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
         .lean(),
@@ -958,7 +983,7 @@ exports.deleteFIRDraft = async (req, res, next) => {
 exports.getPropertyResearch = async (req, res, next) => {
   try {
     const Booking = require('../models/Booking');
-    const requests = await Booking.find({ serviceType: 'property_research', archivedAt: { $exists: false } }).lean()
+    const requests = await Booking.find({ serviceType: 'property_research', 'payment.status': { $in: ['paid', 'not_required'] }, archivedAt: { $exists: false } }).lean()
       .populate('client', 'name email phone')
       .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
       .sort({ createdAt: -1 });
@@ -1089,6 +1114,7 @@ exports.getDocumentForensic = async (req, res, next) => {
     const Booking = require('../models/Booking');
     const requests = await Booking.find({
       archivedAt: { $exists: false },
+      'payment.status': { $in: ['paid', 'not_required'] },
       $or: [
         { serviceType: 'document_forensic' },
         { serviceType: 'forensic' },
@@ -1202,7 +1228,7 @@ exports.getLegalNotices = async (req, res, next) => {
     const Booking = require('../models/Booking');
     const { status, page = 1, limit = 20, search } = req.query;
 
-    const filter = { serviceType: 'legal_notice' };
+    const filter = { serviceType: 'legal_notice', 'payment.status': { $in: ['paid', 'not_required'] } };
     if (status && status !== 'all') filter.status = status;
 
     const skip = (Number(page) - 1) * Number(limit);

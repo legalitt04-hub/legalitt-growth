@@ -4,7 +4,7 @@
 
 import { io } from 'socket.io-client';
 import * as SecureStore from '../utils/secureStorage';
-import { BASE_URL } from './api';
+import api, { BASE_URL } from './api';
 
 // Strip /api/v1 to get base server URL
 const SOCKET_URL = BASE_URL.replace('/api/v1', '');
@@ -13,6 +13,7 @@ const SOCKET_URL = BASE_URL.replace('/api/v1', '');
 const TOKEN_KEY = 'authToken';
 
 let socket = null;
+let refreshingAuth = false;
 let connectionPromise = null; // Lock for concurrent connection attempts
 
 /**
@@ -40,11 +41,16 @@ export const connectSocket = (tokenOverride) => {
       }
 
       // Disconnect stale socket before creating new one
-      if (socket) { socket.disconnect(); socket = null; }
+      if (socket) {
+        socket.auth = { token };
+        socket.connect();
+        connectionPromise = null;
+        return resolve(socket);
+      }
 
       socket = io(SOCKET_URL, {
         auth: { token },
-        transports: ['websocket', 'polling'], // websocket FIRST for low latency
+        transports: ['polling', 'websocket'], // websocket FIRST for low latency
         reconnectionAttempts: 15,             // More attempts for Render cold-starts
         reconnectionDelay: 2000,              // Start with 2s delay
         reconnectionDelayMax: 10000,          // Max 10s between attempts
@@ -58,8 +64,21 @@ export const connectSocket = (tokenOverride) => {
         resolve(socket);
       });
 
-      socket.on('connect_error', (err) => {
-        console.log('[Socket] ❌ Error:', err.message);
+      socket.on('connect_error', async (err) => {
+        console.log('[Socket] Error:', err.message);
+        if (/token|authentication/i.test(err.message) && !refreshingAuth) {
+          refreshingAuth = true;
+          try {
+            // REST's shared interceptor refreshes an expired access token.
+            await api.get('/auth/me');
+            const freshToken = await SecureStore.getItemAsync(TOKEN_KEY);
+            if (socket && freshToken) {
+              socket.auth = { token: freshToken };
+              socket.connect();
+            }
+          } catch { resolve(null); connectionPromise = null; }
+          finally { refreshingAuth = false; }
+        }
       });
 
       socket.io.on('reconnect', (attempt) => {

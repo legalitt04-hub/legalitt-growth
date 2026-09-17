@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { chatAPI } from '../services/api';
 import { getSocket, connectSocket } from '../services/socket';
 import { useAuth } from '../context/AuthContext';
@@ -12,6 +12,7 @@ const PAGE_SIZE = 30;
  * and chat messages all go through ONE socket connection.
  */
 export const useChat = (chatId, userId) => {
+  const focused = useIsFocused();
   const [messages, setMessages]       = useState([]);
   const [loading, setLoading]         = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -30,6 +31,7 @@ export const useChat = (chatId, userId) => {
     try {
       const { data } = await chatAPI.getMessages(chatId, { page, limit: PAGE_SIZE });
       const incoming = data.data || [];
+      await chatAPI.markRead(chatId);
       if (page === 1) {
         setMessages(incoming);
       } else {
@@ -66,7 +68,7 @@ export const useChat = (chatId, userId) => {
 
   // ── Attach socket listeners using the GLOBAL socket ─────────────
   useEffect(() => {
-    if (!chatId) { setLoading(false); return; }
+    if (!chatId || !focused) { setLoading(false); return; }
 
     pageRef.current = 1;
     loadMessages(1);
@@ -105,6 +107,7 @@ export const useChat = (chatId, userId) => {
           return [...prev, msg];
         });
         socket.emit('mark_read', { chatId });
+        chatAPI.markRead(chatId).catch(() => {});
       };
 
       const onRead = ({ chatId: cid, readAt }) => {
@@ -125,6 +128,7 @@ export const useChat = (chatId, userId) => {
       socket.on('connect',            onReconnect);
 
       return () => {
+        socket.emit('leave_chat', { chatId });
         socket.off('new_message',        onNewMessage);
         socket.off('messages_read',      onRead);
         socket.off('user_typing',        onTyping);
@@ -136,14 +140,20 @@ export const useChat = (chatId, userId) => {
     };
 
     let cleanup;
-    ensureAndJoin().then(fn => { cleanup = fn; });
+    let disposed = false;
+    ensureAndJoin().then(fn => { if (disposed) fn?.(); else cleanup = fn; });
 
     return () => {
+      disposed = true;
       clearTimeout(typingTimerRef.current);
       joinedRef.current = false;
       if (cleanup) cleanup();
     };
-  }, [chatId, loadMessages, flushOfflineQueue]);
+  }, [chatId, focused, loadMessages, flushOfflineQueue]);
+
+  useFocusEffect(useCallback(() => {
+    if (chatId) chatAPI.markRead(chatId).catch(() => {});
+  }, [chatId]));
 
   // ── Send a message ────────────────────────────────────────────────
   const sendMessage = useCallback((content, messageType = 'text', fileUrl, fileName) => {
@@ -267,12 +277,14 @@ export const useChatList = () => {
         });
       };
 
-      socket.on('conversation_updated', onUpdated);
-      socket.on('new_message',          onNewMsg);
+      socket.on('conversation_updated', fetchChats);
+      socket.on('new_message', fetchChats);
+      socket.on('messages_read', fetchChats);
 
       return () => {
-        socket.off('conversation_updated', onUpdated);
-        socket.off('new_message',          onNewMsg);
+        socket.off('conversation_updated', fetchChats);
+        socket.off('new_message', fetchChats);
+        socket.off('messages_read', fetchChats);
       };
     };
 

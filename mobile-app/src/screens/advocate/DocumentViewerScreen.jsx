@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   View,
+  Image,
   Text,
   StyleSheet,
   TouchableOpacity,
@@ -59,7 +60,7 @@ export default function DocumentViewerScreen({ navigation, route }) {
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [moreModalVisible, setMoreModalVisible] = useState(false);
   const activeDocument = documents[currentPage - 1] || documentUrl;
-  const activeDocumentUrl = typeof activeDocument === 'object' ? activeDocument?.url : activeDocument;
+  const activeDocumentUrl = typeof activeDocument === 'object' ? (activeDocument?.url || activeDocument?.uri || activeDocument?.fileUrl) : activeDocument;
   const activeFileName = typeof activeDocument === 'object' && activeDocument?.name ? activeDocument.name : fileName;
 
   // ─── TOOLBAR ACTION HANDLERS ───────────────────────────────────────────────
@@ -174,7 +175,7 @@ export default function DocumentViewerScreen({ navigation, route }) {
         <View style={styles.infoCard}>
           <View style={styles.infoLeftCol}>
             <Text style={styles.fileNameText} numberOfLines={1}>
-              {fileName}
+              {activeFileName}
             </Text>
 
             <View style={styles.metaRow}>
@@ -210,6 +211,9 @@ export default function DocumentViewerScreen({ navigation, route }) {
               {activeDocumentUrl ? (
                 (() => {
                   const isPdf = activeDocumentUrl.toLowerCase().includes('.pdf') || (activeFileName && activeFileName.toLowerCase().endsWith('.pdf'));
+                  if (/\.(jpe?g|png|webp|gif)(?:$|[?#])/i.test(activeDocumentUrl) || /\.(jpe?g|png|webp|gif)$/i.test(activeFileName || '')) {
+                    return <Image source={{ uri: activeDocumentUrl }} resizeMode="contain" style={{ width: '100%', height: '100%', transform: [{ scale: zoomLevel }] }} onError={() => setViewerState('error')} />;
+                  }
                   const viewerUri = isPdf 
                     ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(activeDocumentUrl)}`
                     : activeDocumentUrl;
@@ -574,6 +578,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: THEME.viewerBorder,
+    height: 480,
     minHeight: 380,
     alignItems: 'center',
     justifyContent: 'center',

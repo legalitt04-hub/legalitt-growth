@@ -95,7 +95,20 @@ exports.createLegalRequest = async (req, res, next) => {
         }).filter(d => d.url)
       : [];
 
+    let schedule = {};
+    if (req.body.scheduledDate || req.body.scheduledTime) {
+      const day = String(req.body.scheduledDate || '');
+      const match = String(req.body.scheduledTime || '').match(/^(\d{1,2}):(\d{2}) (AM|PM)$/);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !match || +match[1] < 1 || +match[1] > 12 || +match[2] > 59) return next(new AppError('Choose a valid consultation date and time.', 400));
+      const hour = (+match[1] % 12) + (match[3] === 'PM' ? 12 : 0);
+      const startTime = `${String(hour).padStart(2, '0')}:${match[2]}`;
+      const date = new Date(`${day}T${startTime}:00+05:30`);
+      if (!Number.isFinite(date.getTime()) || date <= new Date()) return next(new AppError('Choose a future consultation slot.', 400));
+      schedule = { date, timeSlot: { startTime, endTime: `${String((hour + 1) % 24).padStart(2, '0')}:${match[2]}` } };
+    }
+
     const booking = await Booking.create({
+      ...schedule,
       client: req.user._id,
       consultationMode,
       serviceType,
@@ -107,8 +120,8 @@ exports.createLegalRequest = async (req, res, next) => {
         currency: 'INR',
         status: 'pending',
       },
-      status: 'pending_assignment',
-      assignmentDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      status: 'pending_payment',
+      assignmentDeadline: null,
       clientCity: propDistrict || clientCity || req.user?.address?.city || '',
       clientState: propState || clientState || req.user?.address?.state || '',
       clientCoords: clientCoords || undefined,
@@ -132,57 +145,6 @@ exports.createLegalRequest = async (req, res, next) => {
 
     logger.info(`Legal ${serviceType} request created: ${booking._id} by ${req.user.email}`);
 
-    // Notify all admins via Socket.io
-    const io = req.app.get('io');
-    if (io) {
-      io.to('admin_room').emit('admin:new_booking', {
-        bookingId: booking._id,
-        serviceType: booking.serviceType,
-        consultationMode: booking.consultationMode,
-        clientName: req.user.name,
-        clientCity: booking.clientCity,
-        issue: booking.issue,
-        createdAt: booking.createdAt,
-        assignmentDeadline: booking.assignmentDeadline,
-      });
-    }
-
-    // Notify nearby advocates via WhatsApp (non-blocking)
-    if (booking.clientCity) {
-      setImmediate(async () => {
-        try {
-          const nearbyAdvocates = await Advocate.find({
-            'location.address.city': new RegExp(booking.clientCity, 'i'),
-            isVerified: true,
-            verificationStatus: 'approved',
-          }).lean().populate('user', 'phone name').limit(20);
-
-          if (nearbyAdvocates.length > 0) {
-            const { notifyNearbyAdvocates } = require('../services/whatsappService');
-            await notifyNearbyAdvocates({
-              advocates: nearbyAdvocates,
-              city: booking.clientCity,
-              consultationMode: booking.consultationMode,
-              bookingId: booking._id.toString(),
-            });
-            await Booking.findByIdAndUpdate(booking._id, { whatsappSentToNearby: true });
-          }
-        } catch (err) {
-          logger.error('WhatsApp notify nearby advocates failed:', err.message);
-        }
-      });
-    }
-
-    // Send instant in-app notification to client
-    await createNotification({
-      recipientId: req.user._id,
-      senderId: req.user._id,
-      title: 'Case Request Registered! 📋',
-      message: `Your ${serviceType.replace(/_/g, ' ')} request (ID: LEG-${booking._id.toString().slice(-6).toUpperCase()}) has been registered. Verified advocate will be assigned within 24h.`,
-      type: 'booking_created',
-      relatedId: booking._id,
-    });
-
     res.status(201).json({
       success: true,
       data: {
@@ -191,7 +153,7 @@ exports.createLegalRequest = async (req, res, next) => {
         currency: 'INR',
         status: booking.status,
         assignmentDeadline: booking.assignmentDeadline,
-        message: 'Your request has been submitted. We will assign an advocate within 24 hours.',
+        message: 'Complete payment to submit your request.',
       },
     });
   } catch (err) {
@@ -246,7 +208,8 @@ exports.confirmLegalPayment = async (req, res, next) => {
     booking.payment.razorpayPaymentId = razorpayPaymentId;
     booking.payment.razorpaySignature = razorpaySignature;
     booking.payment.paidAt = new Date();
-    // Keep status as pending_assignment — admin still needs to assign advocate
+    booking.status = 'pending_assignment';
+    booking.assignmentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await booking.save();
 
     logger.info(`Legal request payment confirmed: ${booking._id} — ₹${booking.payment.amount}`);

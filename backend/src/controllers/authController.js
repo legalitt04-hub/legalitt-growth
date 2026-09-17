@@ -145,7 +145,7 @@ exports.googleAuth = async (req, res, next) => {
       } else if (idToken) {
         const ticket = await googleClient.verifyIdToken({
           idToken,
-          audience: process.env.GOOGLE_CLIENT_ID,
+          audience: [process.env.GOOGLE_CLIENT_ID, '400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com'].filter(Boolean),
         });
         payload = ticket.getPayload();
       } else {

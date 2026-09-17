@@ -59,6 +59,19 @@ exports.getMessages = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Explicit read action also works when the realtime connection is unavailable.
+exports.markRead = async (req, res, next) => {
+  try {
+    const chat = await Chat.findById(req.params.id);
+    if (!chat) return next(new AppError('Chat not found.', 404));
+    if (!chat.participants.some(p => p.toString() === req.user._id.toString())) return next(new AppError('Not authorized.', 403));
+    const readAt = new Date();
+    await Message.updateMany({ chat: chat._id, sender: { $ne: req.user._id }, readAt: null }, { $set: { readAt } });
+    req.app.get('io')?.to(`chat:${chat._id}`).emit('messages_read', { chatId: String(chat._id), userId: String(req.user._id), readAt });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+};
+
 // POST /api/chats/:id/messages  (REST fallback — socket is preferred)
 exports.sendMessage = async (req, res, next) => {
   try {

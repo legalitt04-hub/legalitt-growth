@@ -47,7 +47,7 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
     for (let i = 0; i < 14; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-      const iso = d.toISOString().split('T')[0];
+      const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       list.push({
         id: iso,
         iso,
@@ -160,6 +160,8 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
         issueCategory: selectedMatter.id,
         issueDescription: description.trim(),
         preferredSlot,
+        scheduledDate: selectedDate,
+        scheduledTime: selectedTime,
         documents: uploadedFiles.map((f, idx) => {
           if (typeof f === 'string') return { url: f, name: `Attachment_${idx + 1}`, type: f.endsWith('.pdf') ? 'pdf' : 'image' };
           return { url: f.url || f.uri || (typeof f === 'string' ? f : ''), name: f.name || `Attachment_${idx + 1}`, type: f.type || 'document' };

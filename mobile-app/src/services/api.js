@@ -255,6 +255,7 @@ export const bookingAPI = {
 };
 
 export const chatAPI = {
+  markRead: (id) => api.patch(`/chats/${id}/read`),
   getChats: () => api.get('/chats'),
   getMyChats: () => api.get('/chats'),
   sendMessage: (chatId, data) => api.post(`/chats/${chatId}/messages`, data),

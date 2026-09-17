@@ -15,6 +15,21 @@ export default function CalendarView() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [availability, setAvailability] = useState<any[]>([]);
+  const [advocateSearch, setAdvocateSearch] = useState('');
+  const [availabilityError, setAvailabilityError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setAvailability([]); setAvailabilityError('Loading availability…');
+      try {
+        const date = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+        const res = await api.get('/admin/calendar', { params: { availabilityDate: date, search: advocateSearch } });
+        if (!cancelled) { setAvailability(res.data.data || []); setAvailabilityError(''); }
+      } catch { if (!cancelled) setAvailabilityError('Availability could not be loaded.'); }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [selectedDate, advocateSearch]);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -44,6 +59,12 @@ export default function CalendarView() {
       <div><h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2"><CalendarIcon className="w-6 h-6 text-purple-500"/>Calendar & Schedule</h2><p className="text-slate-500 text-sm mt-1">Live consultations and case timeline hearings.</p></div>
       <button onClick={() => navigate('/consultations')} className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium text-sm transition-colors shadow-sm flex items-center gap-2"><Plus className="w-4 h-4"/>Schedule Consultation</button>
     </div>
+    <Card className="p-4 space-y-3">
+      <h3 className="font-bold">Advocate availability — {selectedLabel}</h3>
+      <input className="border rounded-lg p-2 w-full" placeholder="Search advocate name (up to 50 results)" value={advocateSearch} onChange={e => setAdvocateSearch(e.target.value)} />
+      {availabilityError && <p>{availabilityError}</p>}
+      <div className="max-h-80 overflow-y-auto space-y-3">{availability.map(a => <div key={a.id} className="border rounded-lg p-3"><b>{a.name}</b><div className="flex flex-wrap gap-2 mt-2">{a.slots.length ? a.slots.map((slot: any, i: number) => <span key={i} className={`text-sm rounded px-2 py-1 ${slot.status === 'Available' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800'}`}>{slot.startTime}–{slot.endTime}: {slot.status}</span>) : <span className="text-sm text-gray-500">Availability not published for this day</span>}</div>{a.hearings.map((h: any, i: number) => <p key={i} className="text-sm text-amber-700">Hearing: {h.time || 'Time not set'} · {h.title}</p>)}</div>)}</div>
+    </Card>
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
       <div className="lg:col-span-1 space-y-6 flex flex-col h-full">
         <Card className="bg-white border-slate-200 p-4">

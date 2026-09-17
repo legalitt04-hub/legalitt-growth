@@ -6,9 +6,9 @@ export default function SafeScreen({
   children, 
   backgroundColor = '#FFFFFF',
   barStyle = 'dark-content',
-  // Default: no bottom edge — tab/stack navigators handle bottom safe area.
+  // Stack screens must reserve the Android system navigation area.
   // Pass edges={['top','bottom','left','right']} for full-screen modals.
-  edges = ['top', 'left', 'right'],
+  edges = ['top', 'bottom', 'left', 'right'],
 }) {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={edges}>

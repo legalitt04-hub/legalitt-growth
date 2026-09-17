@@ -64,7 +64,7 @@ export const AuthProvider = ({ children }) => {
   // Initialize Google Sign-In on mount — configure with webClientId + androidClientId
   useEffect(() => {
     const webClientId = Constants.expoConfig?.extra?.GOOGLE_WEB_CLIENT_ID
-      || '145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com';
+      || '400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com';
     GoogleSignin.configure({
       webClientId,
       offlineAccess: false,

@@ -131,6 +131,8 @@ const initSocket = async (server) => {
       } catch (err) { logger.error("join_chat:", err.message); }
     });
 
+    socket.on('leave_chat', ({ chatId } = {}) => { if (chatId) socket.leave(`chat:${chatId}`); });
+
     // ── SEND MESSAGE ──────────────────────────────────────────
     socket.on("send_message", async ({ chatId, content, messageType = "text", fileUrl, fileName }) => {
       try {

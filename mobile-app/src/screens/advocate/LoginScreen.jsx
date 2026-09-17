@@ -209,7 +209,7 @@ export default function LoginScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity 
@@ -280,7 +280,9 @@ export default function LoginScreen({ navigation }) {
             />
             <TouchableOpacity
               style={styles.eyeIcon}
-              onPress={() => setShowPassword(!showPassword)}
+              hitSlop={12}
+              accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+              onPress={() => setShowPassword(value => !value)}
               disabled={loading}
             >
               <Ionicons

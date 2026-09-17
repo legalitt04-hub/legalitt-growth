@@ -17,7 +17,7 @@ exports.getPendingBookings = async (req, res, next) => {
     const { status, page = 1, limit = 20, serviceType } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const filter = {};
+    const filter = { 'payment.status': { $in: ['paid', 'not_required'] } };
     if (status) {
       if (status.includes(',')) {
         filter.status = { $in: status.split(',').map(s => s.trim()) };
@@ -39,7 +39,7 @@ exports.getPendingBookings = async (req, res, next) => {
         .limit(Number(limit))
         .lean(),
       Booking.countDocuments(filter),
-      Booking.countDocuments({ status: 'pending_assignment' }),
+      Booking.countDocuments({ status: 'pending_assignment', 'payment.status': { $in: ['paid', 'not_required'] } }),
       Booking.countDocuments({ status: { $in: ['confirmed', 'in_progress'] } }),
       Booking.countDocuments({ status: 'completed' }),
       Booking.countDocuments({}),
@@ -194,6 +194,7 @@ exports.assignAdvocate = async (req, res, next) => {
       .populate('client', 'name email phone fcmToken');
 
     if (!booking) return next(new AppError('Booking not found.', 404));
+    if (!['paid', 'not_required'].includes(booking.payment?.status)) return next(new AppError('Payment must be completed before assignment.', 409));
     if (booking.status === 'completed' || booking.status === 'cancelled') {
       return next(new AppError('Cannot assign to a completed or cancelled booking.', 400));
     }

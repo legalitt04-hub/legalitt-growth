@@ -23,10 +23,10 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 const LoginRegisterScreen = ({ navigation, route }) => {
   const selectedRole = route?.params?.role || 'client';
   const { login, logout, googleLogin, biometricLogin, biometricsEnabled, consentAccepted } = useAuth();
-  
+
   // Toggle between Login and Register modes
   const [mode, setMode] = useState('login'); // 'login' or 'register'
-  
+
   // Form fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,16 +36,6 @@ const LoginRegisterScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [termsError, setTermsError] = useState(false);
-
-  React.useEffect(() => {
-    try {
-      GoogleSignin.configure({
-        webClientId: '145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com',
-      });
-    } catch (e) {
-      console.log('GoogleSignin configure error', e);
-    }
-  }, []);
 
   // Email validation
   const validateEmail = (email) => {
@@ -102,7 +92,7 @@ const LoginRegisterScreen = ({ navigation, route }) => {
     try {
       if (mode === 'login') {
         const response = await login(safeEmail, safePassword);
-        
+
         if (response.success && response.user) {
           // Account logged in successfully.
           // AppNavigator handles routing to AdvocateMain or ClientMain based on user.role
@@ -116,10 +106,10 @@ const LoginRegisterScreen = ({ navigation, route }) => {
         }
       } else {
         // REGISTER MODE — sanitize and proceed to OTP
-        navigation.navigate('OTP', { 
-          email: safeEmail, 
+        navigation.navigate('OTP', {
+          email: safeEmail,
           role: selectedRole,
-          mode: 'register' 
+          mode: 'register'
         });
       }
     } catch (error) {
@@ -226,20 +216,20 @@ const LoginRegisterScreen = ({ navigation, route }) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top','bottom','left','right']}>
-      
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <ScrollView 
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.backButton} 
+            <TouchableOpacity
+              style={styles.backButton}
               onPress={() => {
                 if (navigation.canGoBack()) {
                   navigation.goBack();
@@ -338,7 +328,9 @@ const LoginRegisterScreen = ({ navigation, route }) => {
               />
               <TouchableOpacity
                 style={styles.eyeIcon}
-                onPress={() => setShowPassword(!showPassword)}
+                hitSlop={12}
+              accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+              onPress={() => setShowPassword(value => !value)}
                 disabled={loading}
               >
                 <Ionicons

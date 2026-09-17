@@ -189,7 +189,7 @@ const AdvocatePillTabBar = ({ state, descriptors, navigation }) => {
     <View
       style={[
         pillStyles.wrapper,
-        { bottom: bottomOffset },
+        { paddingBottom: bottomOffset, paddingTop: 8 },
       ]}
       pointerEvents="box-none"
     >
@@ -239,9 +239,7 @@ const AdvocatePillTabBar = ({ state, descriptors, navigation }) => {
 
 const pillStyles = RNStyleSheet.create({
   wrapper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+    backgroundColor: '#FAF9F6',
     alignItems: 'center',
     zIndex: 999,
     paddingHorizontal: 16,

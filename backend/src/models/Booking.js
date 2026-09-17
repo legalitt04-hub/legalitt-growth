@@ -38,6 +38,7 @@ const bookingSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: [
+      'pending_payment',
       'pending_assignment', // Waiting for admin to assign advocate (24h window)
       'pending',            // Assigned but not yet confirmed
       'confirmed',          // Advocate confirmed, ready to proceed

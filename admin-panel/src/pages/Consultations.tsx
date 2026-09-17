@@ -650,7 +650,7 @@ export default function Consultations() {
                       </div>
                     </div>
 
-                    <p className="text-xs text-gray-600 line-clamp-2 bg-gray-50 rounded-lg px-3 py-2 mb-3">
+                    <p className="text-xs text-gray-600 whitespace-pre-wrap break-words bg-gray-50 rounded-lg px-3 py-2 mb-3">
                       {booking.issue}
                     </p>
 
@@ -806,7 +806,7 @@ export default function Consultations() {
 
                   <div className="border-t border-gray-200 pt-3">
                     <span className="text-gray-500 text-sm">Issue Description</span>
-                    <p className="text-sm text-gray-800 mt-1 leading-relaxed">{selectedBooking.issue}</p>
+                    <p className="text-sm text-gray-800 mt-1 leading-relaxed whitespace-pre-wrap break-words">{selectedBooking.issue}</p>
                   </div>
 
                   {/* Documents */}

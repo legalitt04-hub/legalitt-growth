@@ -131,7 +131,8 @@ router.post('/verify-payment', protect, authorize('client'), async (req, res, ne
     }
 
     // ── 5. Mark booking as paid & confirmed ────────────────────────────
-    booking.status = 'confirmed';
+    booking.status = booking.advocate ? 'confirmed' : 'pending_assignment';
+    if (!booking.advocate) booking.assignmentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
     booking.payment.status = 'paid';
     booking.payment.razorpayOrderId   = razorpay_order_id;
     booking.payment.razorpayPaymentId = razorpay_payment_id;
