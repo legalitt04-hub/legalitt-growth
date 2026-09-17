@@ -55,7 +55,7 @@ const PaymentSuccessScreen = ({ navigation, route }) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.navigate('ClientMain', { screen: 'Home' })}
         >
           <Ionicons name="chevron-back" size={24} color="#1F2937" />
         </TouchableOpacity>

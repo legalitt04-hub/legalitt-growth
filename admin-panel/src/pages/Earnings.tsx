@@ -11,13 +11,14 @@ const Earnings = () => {
   const [data, setData] = useState<any>(null);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState('monthly');
 
   useEffect(() => {
     const fetchEarnings = async () => {
       try {
         const [earnRes, revRes] = await Promise.all([
           api.get('/admin/earnings'),
-          api.get('/admin/revenue?period=monthly')
+          api.get(`/admin/revenue?period=${period}`)
         ]);
         
         setData(earnRes.data.data);
@@ -34,7 +35,7 @@ const Earnings = () => {
           revMap[`${d._id.month}/${d._id.year}`] = { revenue: d.revenue, bookings: d.count };
         });
 
-        if (revRes.data.data?.length > 2) {
+        if (period === 'monthly') {
           const formattedRev = last6Months.map(m => {
             const key = `${m.month}/${m.year}`;
             const existing = revMap[key] || { revenue: 0, bookings: 0 };
@@ -45,45 +46,7 @@ const Earnings = () => {
             };
           });
           setRevenueData(formattedRev);
-        } else {
-          // Use distributor function to ensure graph matches KPIs
-          const monthlyRev = earnRes.data.data?.thisMonthRevenue || 845000;
-          const totalRev = earnRes.data.data?.totalRevenue || 9250000;
-          let targetTotalRevenue = monthlyRev * 6; // last 6 months
-          
-          if (targetTotalRevenue > totalRev) {
-            targetTotalRevenue = totalRev; // Cap it so it doesn't exceed total lifetime revenue
-          }
-          
-          const distribute = (total: number, count: number) => {
-            if (total <= 0) return Array(count).fill(0);
-            let arr = [];
-            let sum = 0;
-            const pseudoRandom = (seed: number) => {
-              const x = Math.sin(seed + 3.3) * 10000;
-              return x - Math.floor(x);
-            };
-            for(let i=0; i<count; i++) {
-              const val = (i+1) + pseudoRandom(i) * count; 
-              arr.push(val);
-              sum += val;
-            }
-            arr = arr.map(v => Math.round((v / sum) * total));
-            const newSum = arr.reduce((a,b)=>a+b, 0);
-            arr[count-1] += (total - newSum);
-            if(arr[count-1] < 0) arr[count-1] = 0;
-            return arr;
-          };
-
-          const revArray = distribute(targetTotalRevenue, 6);
-          const formattedRev = last6Months.map((m, idx) => ({
-            name: `${m.month}/${m.year}`,
-            revenue: revArray[5 - idx], // Reverse index because last6Months is reverse chronological
-            bookings: 0
-          }));
-          
-          setRevenueData(formattedRev);
-        }
+        } else setRevenueData((revRes.data.data || []).map((item: any) => ({ name: item.label, revenue: item.revenue || 0, bookings: item.count || 0 })));
       } catch (err) {
         console.error('Failed to load earnings', err);
       } finally {
@@ -92,7 +55,7 @@ const Earnings = () => {
     };
 
     fetchEarnings();
-  }, []);
+  }, [period]);
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val || 0);
 
@@ -110,7 +73,7 @@ const Earnings = () => {
     );
   }
 
-  const avgBookingValue = data?.totalBookings > 0 ? Math.round((data?.totalRevenue || 0) / data.totalBookings) : (1731);
+  const avgBookingValue = data?.avgBookingValue || 0;
 
   const handleExport = () => {
     if (!data?.topAdvocates) return;
@@ -127,10 +90,10 @@ const Earnings = () => {
   };
 
   const statsCards = [
-    { label: 'Total Platform Revenue', value: data?.totalRevenue || 9250000, sub: `${data?.totalBookings || 4880} bookings`, color: 'from-teal-500 to-emerald-500', type: 'currency' },
-    { label: "This Month's Revenue", value: data?.thisMonthRevenue || 845000, sub: `${data?.thisMonthBookings ?? 215} bookings`, color: 'from-blue-500 to-indigo-500', type: 'currency' },
-    { label: 'Avg. Booking Value', value: avgBookingValue || 1731, sub: 'Per paid booking', color: 'from-purple-500 to-pink-500', type: 'currency' },
-    { label: 'Top Advocates', value: data?.topAdvocates?.length || 10, sub: 'This period', color: 'from-amber-500 to-orange-500', type: 'number' },
+    { label: 'Total Platform Revenue', value: data?.totalRevenue || 0, sub: `${data?.totalBookings || 0} bookings`, color: 'from-teal-500 to-emerald-500', type: 'currency' },
+    { label: "This Month's Revenue", value: data?.thisMonthRevenue || 0, sub: `${data?.thisMonthBookings || 0} bookings`, color: 'from-blue-500 to-indigo-500', type: 'currency' },
+    { label: 'Avg. Booking Value', value: avgBookingValue, sub: 'Per paid booking', color: 'from-purple-500 to-pink-500', type: 'currency' },
+    { label: 'Top Advocates', value: data?.topAdvocates?.length || 0, sub: 'Based on paid bookings', color: 'from-amber-500 to-orange-500', type: 'number' },
   ];
 
   return (
@@ -149,33 +112,14 @@ const Earnings = () => {
           <p className="text-slate-500 text-sm mt-1">Platform revenue, payouts, and financial insights.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <select className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm">
-            <option>All Dates</option>
-            <option>Today</option>
-            <option>This Week</option>
-            <option>This Month</option>
-          </select>
-          <select className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm">
-            <option>All Services</option>
-            <option>Legal Notice</option>
-            <option>Property Search</option>
-            <option>FIR Draft</option>
-          </select>
-          <select className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm">
-            <option>All Advocates</option>
-            <option>Top Earners</option>
-          </select>
-          <select className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm">
-            <option>All Statuses</option>
-            <option>Success</option>
-            <option>Pending</option>
-            <option>Failed</option>
+          <select value={period} onChange={e => setPeriod(e.target.value)} className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm">
+            <option value="daily">Last 30 days</option><option value="weekly">Last 12 weeks</option><option value="monthly">Last 12 months</option><option value="yearly">Last 5 years</option>
           </select>
           <Button onClick={handleExport} variant="outline" className="bg-white border-slate-200 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 h-9 text-sm active:scale-95 transition-transform shadow-sm">
             <Download className="w-4 h-4 mr-2" />
             Excel
           </Button>
-          <Button variant="outline" className="bg-white border-slate-200 text-rose-600 hover:text-rose-700 hover:bg-rose-50 h-9 text-sm active:scale-95 transition-transform shadow-sm">
+          <Button onClick={() => window.print()} variant="outline" className="bg-white border-slate-200 text-rose-600 hover:text-rose-700 hover:bg-rose-50 h-9 text-sm active:scale-95 transition-transform shadow-sm">
             <FileText className="w-4 h-4 mr-2" />
             PDF
           </Button>

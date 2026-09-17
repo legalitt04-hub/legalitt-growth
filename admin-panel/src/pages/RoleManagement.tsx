@@ -6,6 +6,7 @@ import {
   ChevronRight, Activity
 } from 'lucide-react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface AdminAccount {
   _id: string;
@@ -46,6 +47,8 @@ const PERMISSION_LABELS: Record<string, string> = {
 const EMPTY_FORM = { name: '', email: '', phone: '', role: '', password: '' };
 
 export default function RoleManagement() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,10 +143,12 @@ export default function RoleManagement() {
         </div>
         <div className="flex items-center gap-3">
           <button onClick={fetchData} className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"><RefreshCw className="w-4 h-4" /></button>
-          <button onClick={() => { setEditId(null); setForm(EMPTY_FORM); setShowForm(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-xl hover:bg-teal-700">
-            <Plus className="w-4 h-4" /> Add Admin Account
-          </button>
+          {isSuperAdmin && (
+            <button onClick={() => { setEditId(null); setForm(EMPTY_FORM); setShowForm(true); }}
+              className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-semibold rounded-xl hover:bg-teal-700">
+              <Plus className="w-4 h-4" /> Add Admin Account
+            </button>
+          )}
         </div>
       </div>
 
@@ -232,18 +237,22 @@ export default function RoleManagement() {
                     className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
                     <Eye className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => handleToggleStatus(acc)} title={acc.isActive ? 'Disable' : 'Enable'}
-                    className={`p-1.5 rounded-lg transition-colors ${acc.isActive ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}>
-                    {acc.isActive ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                  </button>
-                  <button onClick={() => { setResetTarget(acc); setNewPw(''); }} title="Reset password"
-                    className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
-                    <Lock className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => handleRemoveRole(acc)} title="Revoke admin role & remove from team"
-                    className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {isSuperAdmin && acc._id !== user?._id && (
+                    <>
+                      <button onClick={() => handleToggleStatus(acc)} title={acc.isActive ? 'Disable' : 'Enable'}
+                        className={`p-1.5 rounded-lg transition-colors ${acc.isActive ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}>
+                        {acc.isActive ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                      </button>
+                      <button onClick={() => { setResetTarget(acc); setNewPw(''); }} title="Reset password"
+                        className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+                        <Lock className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleRemoveRole(acc)} title="Revoke admin role & remove from team"
+                        className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

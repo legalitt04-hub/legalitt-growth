@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  TextInput, Platform, Image,
+  TextInput, Platform, Image, Linking, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SIZES, SHADOWS } from '../../constants/theme';
@@ -13,6 +13,20 @@ export const MessageBubble = ({ message, isMe, showAvatar = true }) => {
   const isFile = message.messageType === 'file' || message.messageType === 'image';
   const isImage = message.messageType === 'image';
   const timeStr = formatDate(message.createdAt, 'time');
+
+  const openAttachment = async () => {
+    if (!message.fileUrl) {
+      Alert.alert('Attachment unavailable', 'This message does not contain a valid document link.');
+      return;
+    }
+    try {
+      const supported = await Linking.canOpenURL(message.fileUrl);
+      if (!supported) throw new Error('Unsupported attachment URL');
+      await Linking.openURL(message.fileUrl);
+    } catch {
+      Alert.alert('Unable to open attachment', 'Please try again after checking your connection.');
+    }
+  };
 
   return (
     <View style={[styles.bubbleRow, isMe && styles.bubbleRowMe]}>
@@ -33,7 +47,7 @@ export const MessageBubble = ({ message, isMe, showAvatar = true }) => {
       <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
         {/* File message */}
         {isFile && !isImage && (
-          <TouchableOpacity style={styles.fileBubble}>
+          <TouchableOpacity style={styles.fileBubble} onPress={openAttachment}>
             <View style={styles.fileIconWrap}>
               <Ionicons
                 name={getFileIcon(message.fileName)}
@@ -54,7 +68,7 @@ export const MessageBubble = ({ message, isMe, showAvatar = true }) => {
 
         {/* Image message */}
         {isImage && message.fileUrl && (
-          <TouchableOpacity>
+          <TouchableOpacity onPress={openAttachment}>
             <Image
               source={{ uri: message.fileUrl }}
               style={styles.imageMessage}
@@ -106,7 +120,7 @@ export const TypingIndicator = ({ name }) => (
 
 // ─── ChatInput ────────────────────────────────────────────────────────────────
 
-export const ChatInput = ({ onSend, onAttach, onTyping, disabled = false }) => {
+export const ChatInput = ({ onSend, onAttach, onTyping, onCall, disabled = false }) => {
   const [text, setText] = useState('');
   const [showAttach, setShowAttach] = useState(false);
 
@@ -180,7 +194,7 @@ export const ChatInput = ({ onSend, onAttach, onTyping, disabled = false }) => {
           returnKeyType="default"
         />
 
-        <TouchableOpacity style={styles.callIcon} disabled={disabled}>
+        <TouchableOpacity style={styles.callIcon} onPress={onCall} disabled={disabled || !onCall}>
           <Ionicons name="call-outline" size={22} color={COLORS.textSecondary} />
         </TouchableOpacity>
 

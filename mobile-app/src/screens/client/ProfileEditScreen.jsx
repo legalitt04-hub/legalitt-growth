@@ -150,10 +150,13 @@ const ProfileEditScreen = ({ navigation }) => {
           <View style={styles.avatarSection}>
             <TouchableOpacity onPress={pickImage} disabled={uploading}>
               <View style={styles.avatarWrapper}>
-                <Image 
-                  source={{ uri: user?.avatar || 'https://i.pravatar.cc/200?img=1' }} 
-                  style={styles.avatar} 
-                />
+                {user?.avatar ? (
+                  <Image source={{ uri: user.avatar }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Ionicons name="person" size={40} color="#64748B" />
+                  </View>
+                )}
                 <View style={styles.cameraBtn}>
                   <Ionicons name="camera" size={18} color="#fff" />
                 </View>
@@ -269,6 +272,7 @@ const styles = StyleSheet.create({
   avatarSection: { alignItems: 'center', marginBottom: normalize(25) },
   avatarWrapper: { width: normalize(100), height: normalize(100), borderRadius: normalize(50), position: 'relative' },
   avatar: { width: normalize(100), height: normalize(100), borderRadius: normalize(50), backgroundColor: '#e2e8f0' },
+  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   cameraBtn: { position: 'absolute', bottom: 0, right: 0, backgroundColor: COLORS.primary, width: normalize(32), height: normalize(32), borderRadius: normalize(16), alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
   uploadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: normalize(50), alignItems: 'center', justifyContent: 'center' },
   avatarHint: { fontSize: normalize(12), color: '#64748b', marginTop: normalize(10), fontWeight: '500' },

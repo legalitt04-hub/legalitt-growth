@@ -46,6 +46,16 @@ const NotificationsScreen = ({ navigation }) => {
       const today = [];
       const earlier = [];
 
+      const relativeTime = (value) => {
+        if (!value) return '';
+        const seconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000));
+        if (seconds < 60) return 'Just now';
+        if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+        if (seconds < oneDay) return `${Math.floor(seconds / 3600)} hr ago`;
+        if (seconds < 7 * oneDay) return `${Math.floor(seconds / oneDay)} days ago`;
+        return new Date(value).toLocaleDateString();
+      };
+
       serverData.forEach((item) => {
         const itemTime = item.createdAt ? new Date(item.createdAt).getTime() : now;
         const isToday = now - itemTime < oneDay;
@@ -58,7 +68,7 @@ const NotificationsScreen = ({ navigation }) => {
             : 'document-text-outline',
           title: item.title,
           description: item.message || item.description,
-          time: isToday ? '1 hour ago' : 'Yesterday',
+          time: relativeTime(item.createdAt),
           unread: !item.read,
           targetScreen: item.type === 'message_received' ? 'ChatList' : 'Requests',
         };
@@ -69,7 +79,9 @@ const NotificationsScreen = ({ navigation }) => {
       setTodayList(today);
       setEarlierList(earlier);
     } catch (err) {
-      console.log('Using default mock notifications on fetch error:', err.message);
+      console.log('Notifications fetch error:', err.message);
+      setTodayList([]);
+      setEarlierList([]);
     } finally {
       setLoading(false);
       setRefreshing(false);

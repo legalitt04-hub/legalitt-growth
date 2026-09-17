@@ -18,7 +18,7 @@ import { paymentAPI, bookingAPI } from '../../services/api';
 import RazorpayCheckout from 'react-native-razorpay';
 
 const PaymentScreen = ({ navigation, route }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('select'); // 'select' | 'processing' | 'verifying'
@@ -75,42 +75,30 @@ const PaymentScreen = ({ navigation, route }) => {
 
       const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
 
-      let razorpay_payment_id, razorpay_signature, razorpay_order_id;
-
-      if (__DEV__) {
-        // ── DEV MODE: bypass real payment for testing ──────────────────────
-        razorpay_payment_id = 'pay_dev_' + Math.random().toString(36).substring(2, 11);
-        razorpay_order_id   = orderId;
-        razorpay_signature  = 'dev_bypass';
-      } else {
-        // ── PRODUCTION: open real Razorpay payment sheet ───────────────────
-        setStep('processing');
-        const paymentData = await RazorpayCheckout.open({
-          key: keyId,
-          order_id: orderId,
-          amount: orderAmount,       // in paise (already from backend)
-          currency: currency || 'INR',
-          name: 'Legalitt Legal Services',
-          description: `Consultation with ${advocateName || 'Advocate'}`,
-          image: 'https://legalitt-growth.onrender.com/logo.png',
-          prefill: {
-            name: user?.name || '',
-            email: user?.email || '',
+      setStep('processing');
+      const paymentData = await RazorpayCheckout.open({
+        key: keyId,
+        order_id: orderId,
+        amount: orderAmount,
+        currency: currency || 'INR',
+        name: 'Legalitt Legal Services',
+        description: `Consultation with ${advocateName || 'Advocate'}`,
+        image: 'https://legalitt-growth.onrender.com/logo.png',
+        prefill: {
+          name: user?.name || '',
+          email: user?.email || '',
+        },
+        notes: { bookingId },
+        theme: { color: '#14B8A6' },
+        modal: {
+          ondismiss: () => {
+            setLoading(false);
+            setStep('select');
           },
-          notes: { bookingId },
-          theme: { color: '#14B8A6' },
-          modal: {
-            ondismiss: () => {
-              setLoading(false);
-              setStep('select');
-            },
-          },
-        });
+        },
+      });
 
-        razorpay_payment_id = paymentData.razorpay_payment_id;
-        razorpay_order_id   = paymentData.razorpay_order_id;
-        razorpay_signature  = paymentData.razorpay_signature;
-      }
+      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = paymentData;
 
       setStep('verifying');
 
@@ -177,7 +165,7 @@ const PaymentScreen = ({ navigation, route }) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Home')}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ClientMain', { screen: 'Home' })}
           disabled={loading}
         >
           <Ionicons name="chevron-back" size={24} color={loading ? '#D1D5DB' : '#1F2937'} />

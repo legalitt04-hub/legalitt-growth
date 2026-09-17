@@ -4,19 +4,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { LEGAL_THEME } from '../../constants/legalAdviceTheme';
 
 export const LawyerCard = ({
-  name = "Adv. Rajesh Kumar",
-  title = "Senior Supreme Court Advocate",
-  experience = "15+ Years Exp.",
-  rating = "4.9",
-  reviewsCount = "340+",
-  avatarUri = "https://i.pravatar.cc/150?img=11",
+  name = "Assigned Advocate",
+  title = "Verified Advocate",
+  experience = "",
+  rating = 0,
+  reviewsCount = 0,
+  avatarUri = null,
   onContact,
   compact = false,
 }) => {
   return (
     <View style={styles.cardContainer}>
       <View style={styles.headerRow}>
-        <Image source={{ uri: avatarUri }} style={styles.avatar} />
+        {avatarUri ? (
+          <Image source={{ uri: avatarUri }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, styles.avatarFallback]}>
+            <Text style={styles.avatarInitial}>{String(name || 'A').charAt(0).toUpperCase()}</Text>
+          </View>
+        )}
         <View style={styles.infoContainer}>
           <View style={styles.nameRow}>
             <Text style={styles.nameText} numberOfLines={1}>{name}</Text>
@@ -67,6 +73,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: LEGAL_THEME.colors.cream,
     marginRight: 12,
+  },
+  avatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    color: LEGAL_THEME.colors.primaryGold,
+    fontSize: 22,
+    fontWeight: '700',
   },
   infoContainer: {
     flex: 1,

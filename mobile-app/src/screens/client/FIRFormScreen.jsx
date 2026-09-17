@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { firAPI } from '../../services/api';
+import { firAPI, uploadAPI } from '../../services/api';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 
@@ -78,16 +78,7 @@ const FIRFormScreen = ({ route, navigation }) => {
       const file = result.assets[0];
       setLoading(true);
 
-      const formDataUpload = new FormData();
-      formDataUpload.append('file', {
-        uri: file.uri,
-        name: file.name,
-        type: file.mimeType || 'application/octet-stream',
-      });
-
-      const response = await api.post('/fir/upload', formDataUpload, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const response = await uploadAPI.uploadFile(file.uri, file.name, file.mimeType || 'application/octet-stream');
 
       if (response.data.success) {
         addArrayItem('evidence', { name: file.name, url: response.data.data.url, type: file.mimeType });

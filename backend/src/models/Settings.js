@@ -23,6 +23,12 @@ const settingsSchema = new mongoose.Schema({
     type: Number,
     default: 30,
   },
+
+  branding: {
+    primaryColor: { type: String, default: '#f59e0b' },
+    logoUrl: { type: String, default: '/logo.png' },
+    faviconUrl: { type: String, default: '/logo.png' },
+  },
   
   // Feature Flags
   features: {

@@ -23,19 +23,19 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   admin:                 ['dashboard','users','advocates','cases','consultations','earnings','withdrawals','support','reviews','reports','notifications'],
   support_executive:     ['dashboard','consultations','support','notifications'],
   accounts:              ['dashboard','earnings','withdrawals','reports'],
-  forensic_expert:       ['dashboard','cases','documents'],
-  property_verification: ['dashboard','cases','documents'],
+  forensic_expert:       ['dashboard','documents','document_forensic'],
+  property_verification: ['dashboard','documents','property_research'],
 };
 
 const PERMISSION_PATH_MAP: Record<string, string[]> = {
   dashboard:     ['/'],
   users:         ['/users'],
   advocates:     ['/advocates', '/pending-advocates', '/verification'],
-  cases:         ['/cases'],
-  consultations: ['/consultations', '/chats', '/calendar'],
+  cases:         ['/cases', '/fir-drafts', '/legal-notices'],
+  consultations: ['/consultations', '/chats', '/calendar', '/call-history'],
   ads:           ['/ads'],
   roles:         ['/roles', '/admins'],
-  earnings:      ['/earnings', '/coupons'],
+  earnings:      ['/earnings', '/coupons', '/payment-history', '/transactions', '/pricing'],
   withdrawals:   ['/withdrawals'],
   settings:      ['/settings'],
   support:       ['/support'],
@@ -44,11 +44,14 @@ const PERMISSION_PATH_MAP: Record<string, string[]> = {
   audit:         ['/audit-logs'],
   notifications: ['/notifications'],
   documents:     ['/documents', '/ai-drafts', '/categories', '/services'],
+  document_forensic: ['/document-forensic'],
+  property_research: ['/property-research'],
 };
 
 function buildUser(raw: any) {
-  const role = raw.role || 'admin';
-  const perms = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS['admin'];
+  const aliases: Record<string, string> = { superadmin: 'super_admin', support: 'support_executive' };
+  const role = aliases[raw.role] || raw.role || '';
+  const perms = ROLE_PERMISSIONS[role] || [];
   const paths = perms.flatMap((p: string) => PERMISSION_PATH_MAP[p] || []);
   return {
     _id: raw._id, name: raw.name, email: raw.email,

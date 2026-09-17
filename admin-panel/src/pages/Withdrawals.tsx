@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
 import {
   Wallet, Clock, CheckCircle, XCircle, Search,
-  RefreshCw, IndianRupee, TrendingUp, AlertCircle, Copy, Check, Download as DownloadIcon, Filter
+  RefreshCw, TrendingUp, Copy, Check, Download as DownloadIcon, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -23,7 +22,7 @@ interface Withdrawal {
   processedAt?: string;
   createdAt: string;
   advocateUser: { name: string; email: string; phone?: string };
-  advocate: { barCouncilNumber?: string; wallet?: { balance: number; totalEarned: number } };
+  advocate: { _id?: string; barCouncilNumber?: string; wallet?: { balance: number; totalEarned: number } };
 }
 
 const STATUS_CONFIG = {
@@ -36,6 +35,9 @@ const STATUS_CONFIG = {
 export default function Withdrawals() {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
+  const [stats, setStats] = useState({ pendingCount: 0, paidCount: 0, rejectedCount: 0, requestsToday: 0 });
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'paid' | 'rejected' | 'all'>('pending');
   const [selected, setSelected] = useState<Withdrawal | null>(null);
@@ -50,15 +52,17 @@ export default function Withdrawals() {
   const fetchWithdrawals = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/admin/withdrawals', { params: { status: activeTab } });
+      const { data } = await api.get('/admin/withdrawals', { params: { status: activeTab, page, limit: 20 } });
       setWithdrawals(data.data || []);
       if (data.pendingTotal !== undefined) setPendingTotal(data.pendingTotal);
+      if (data.stats) setStats(data.stats);
+      setTotalPages(data.pagination?.pages || 1);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, page]);
 
   useEffect(() => { fetchWithdrawals(); }, [fetchWithdrawals]);
 
@@ -152,8 +156,8 @@ export default function Withdrawals() {
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: 'Pending Payout', value: `₹${pendingTotal.toLocaleString('en-IN')}`, color: 'from-amber-500 to-orange-500', icon: <Clock className="w-5 h-5 text-white" /> },
-          { label: 'Requests Today', value: withdrawals.filter(w => new Date(w.createdAt).toDateString() === new Date().toDateString()).length, color: 'from-blue-500 to-indigo-500', icon: <Wallet className="w-5 h-5 text-white" /> },
-          { label: 'Pending Count', value: withdrawals.filter(w => w.status === 'pending').length, color: 'from-rose-500 to-pink-500', icon: <TrendingUp className="w-5 h-5 text-white" /> },
+          { label: 'Requests Today', value: stats.requestsToday, color: 'from-blue-500 to-indigo-500', icon: <Wallet className="w-5 h-5 text-white" /> },
+          { label: 'Pending Count', value: stats.pendingCount, color: 'from-rose-500 to-pink-500', icon: <TrendingUp className="w-5 h-5 text-white" /> },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center gap-4 shadow-sm">
             <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${s.color} flex items-center justify-center flex-shrink-0`}>
@@ -172,7 +176,7 @@ export default function Withdrawals() {
         <div className="flex items-center justify-between px-4 pt-4 pb-0 border-b border-slate-100">
           <div className="flex gap-1">
             {(['pending', 'paid', 'rejected', 'all'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
+              <button key={tab} onClick={() => { setActiveTab(tab); setPage(1); }}
                 className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 capitalize transition-colors ${
                   activeTab === tab
                     ? 'border-amber-500 text-amber-700 bg-amber-50/50'
@@ -230,9 +234,7 @@ export default function Withdrawals() {
                   <motion.tr key={w._id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="hover:bg-slate-50/70 transition-colors">
                     <td className="px-4 py-3">
-                      <Link to={`/advocates/${w.advocate?._id}`} className="font-semibold text-slate-900 text-sm hover:text-amber-600 transition-colors">
-                        {w.advocateUser?.name}
-                      </Link>
+                      <span className="font-semibold text-slate-900 text-sm">{w.advocateUser?.name}</span>
                       <p className="text-xs text-slate-400">{w.advocateUser?.email}</p>
                     </td>
                     <td className="px-4 py-3">
@@ -272,6 +274,15 @@ export default function Withdrawals() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+            <span className="text-xs text-slate-500">Page {page} of {totalPages}</span>
+            <div className="flex gap-2">
+              <button disabled={page <= 1} onClick={() => setPage(value => value - 1)} className="p-1.5 border rounded-lg disabled:opacity-40"><ChevronLeft className="w-4 h-4" /></button>
+              <button disabled={page >= totalPages} onClick={() => setPage(value => value + 1)} className="p-1.5 border rounded-lg disabled:opacity-40"><ChevronRight className="w-4 h-4" /></button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Process/View Modal */}

@@ -1,5 +1,5 @@
 // screens/client/PropertyResearchChecklistScreen.jsx
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,24 +30,9 @@ const CHECKLIST_ITEMS = [
   'Final Report Preparation',
 ];
 
-export default function PropertyResearchChecklistScreen({ navigation, route }) {
+export default function PropertyResearchChecklistScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { paymentStatus } = route.params || {};
-
-  // PREMIUM LOCK GATE
-  useEffect(() => {
-    if (paymentStatus !== 'SUCCESS') {
-      navigation.replace('PropertyResearchLock');
-    }
-  }, [paymentStatus]);
-
-  if (paymentStatus !== 'SUCCESS') {
-    return null;
-  }
-
-  const handleContactExpert = () => {
-    Linking.openURL('tel:18001234567');
-  };
+  const handleContactExpert = () => navigation.navigate('Support');
 
   return (
     <View style={styles.container}>

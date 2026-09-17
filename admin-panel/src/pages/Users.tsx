@@ -7,6 +7,7 @@ import {
   MessageSquare, Send, StickyNote, Camera, MapPin, User
 } from 'lucide-react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface User {
   _id: string;
@@ -29,6 +30,8 @@ const EDIT_FORM = (u: User) => ({
 });
 
 export default function UsersPage() {
+  const { user: adminUser } = useAuth();
+  const isSuperAdmin = adminUser?.role === 'super_admin';
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -266,9 +269,9 @@ export default function UsersPage() {
                           className={`p-1.5 rounded-lg ${user.isActive ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'} hover:opacity-80`}>
                           {user.isActive ? <ShieldOff className="w-3.5 h-3.5" /> : <Shield className="w-3.5 h-3.5" />}
                         </button>
-                        <button onClick={() => { setResetTarget(user); setNewPw(''); }} className="p-1.5 rounded-lg bg-violet-50 text-violet-600 hover:bg-violet-100" title="Reset Password"><Key className="w-3.5 h-3.5" /></button>
+                        {isSuperAdmin && <button onClick={() => { setResetTarget(user); setNewPw(''); }} className="p-1.5 rounded-lg bg-violet-50 text-violet-600 hover:bg-violet-100" title="Reset Password"><Key className="w-3.5 h-3.5" /></button>}
                         <button onClick={() => openNotes(user)} className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100" title="Internal Notes"><StickyNote className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteId(user._id)} className="p-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {isSuperAdmin && <button onClick={() => setDeleteId(user._id)} className="p-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>

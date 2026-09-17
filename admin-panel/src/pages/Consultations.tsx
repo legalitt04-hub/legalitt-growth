@@ -37,7 +37,7 @@ interface NearbyAdvocate {
   _id: string;
   user: { _id: string; name: string; avatar?: string; phone?: string; email?: string };
   specializations: string[];
-  rating?: { average: number };
+  rating?: { average: number; count: number };
   consultationFee?: number;
   location?: { address?: { city?: string } };
   verificationStatus: string;
@@ -132,16 +132,17 @@ export default function Consultations() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [submittingCase, setSubmittingCase] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [servicePrices, setServicePrices] = useState<Record<string, number>>({});
   const [createForm, setCreateForm] = useState({
     clientName: '',
     clientEmail: '',
     clientPhone: '',
-    clientCity: 'Jabalpur',
+    clientCity: '',
     serviceType: 'legal_advice',
     consultationMode: 'chat',
-    preferredSlot: 'Tomorrow, 10:30 AM',
+    preferredSlot: '',
     issueDescription: '',
-    amount: 499,
+    amount: 0,
     advocateId: '',
     documents: [] as { url: string; name: string; type: string }[],
   });
@@ -149,6 +150,25 @@ export default function Consultations() {
   const [submittingNote, setSubmittingNote] = useState(false);
   const [bookingChatMessages, setBookingChatMessages] = useState<any[]>([]);
   const [loadingChatMessages, setLoadingChatMessages] = useState(false);
+
+  useEffect(() => {
+    api.get('/pricing').then(res => {
+      const prices = (res.data?.data || []).reduce((map: Record<string, number>, item: any) => {
+        map[item.serviceId] = Number(item.basePrice) || 0;
+        return map;
+      }, {});
+      setServicePrices(prices);
+      setCreateForm(prev => ({ ...prev, amount: prices.chat_consultation || 0 }));
+    }).catch(() => setServicePrices({}));
+  }, []);
+
+  const priceKeyFor = (serviceType: string, mode: string) => serviceType === 'legal_advice'
+    ? `${mode === 'voice' ? 'voice' : mode === 'video' ? 'video' : 'chat'}_consultation`
+    : serviceType;
+
+  const updateCreateService = (serviceType: string, consultationMode = createForm.consultationMode) => {
+    setCreateForm(prev => ({ ...prev, serviceType, consultationMode, amount: servicePrices[priceKeyFor(serviceType, consultationMode)] || 0 }));
+  };
 
   useEffect(() => {
     if (selectedBooking?._id) {
@@ -201,9 +221,9 @@ export default function Consultations() {
         alert(res.data.data.message || 'Case created successfully!');
         setShowCreateModal(false);
         setCreateForm({
-          clientName: '', clientEmail: '', clientPhone: '', clientCity: 'Jabalpur',
-          serviceType: 'legal_advice', consultationMode: 'chat', preferredSlot: 'Tomorrow, 10:30 AM',
-          issueDescription: '', amount: 499, advocateId: '', documents: [],
+          clientName: '', clientEmail: '', clientPhone: '', clientCity: '',
+          serviceType: 'legal_advice', consultationMode: 'chat', preferredSlot: '',
+          issueDescription: '', amount: servicePrices.chat_consultation || 0, advocateId: '', documents: [],
         });
         fetchBookings();
       }
@@ -393,12 +413,12 @@ export default function Consultations() {
     if (cityFilter && (a.location?.address?.city || '').toLowerCase() !== cityFilter.toLowerCase()) {
       return false;
     }
-    if (minRating > 0 && (a.rating?.average || 5.0) < minRating) {
+    if (minRating > 0 && (a.rating?.average || 0) < minRating) {
       return false;
     }
     return true;
   }).sort((a, b) => {
-    if (sortBy === 'rating') return (b.rating?.average || 5) - (a.rating?.average || 5);
+    if (sortBy === 'rating') return (b.rating?.average || 0) - (a.rating?.average || 0);
     if (sortBy === 'fee_low') return (a.consultationFee || 0) - (b.consultationFee || 0);
     if (sortBy === 'fee_high') return (b.consultationFee || 0) - (a.consultationFee || 0);
     if (sortBy === 'name') return (a.user?.name || '').localeCompare(b.user?.name || '');
@@ -1058,7 +1078,7 @@ export default function Consultations() {
                                 </p>
                                 <div className="flex items-center flex-wrap gap-2 mt-1.5">
                                   <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-md font-bold">
-                                    <Star size={11} fill="currentColor" className="text-amber-500" /> Rated by Admin: {adv.rating?.average ? adv.rating.average.toFixed(1) : '5.0'}
+                                    <Star size={11} fill="currentColor" className="text-amber-500" /> Client rating: {adv.rating?.count ? `${adv.rating.average.toFixed(1)} (${adv.rating.count})` : 'No ratings'}
                                   </span>
                                   {adv.consultationFee ? (
                                     <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">₹{adv.consultationFee}</span>
@@ -1167,7 +1187,7 @@ export default function Consultations() {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="font-semibold text-gray-700 mb-1 block">Service Type</label>
-                    <select value={createForm.serviceType} onChange={e => setCreateForm({ ...createForm, serviceType: e.target.value })}
+                    <select value={createForm.serviceType} onChange={e => updateCreateService(e.target.value)}
                       className="w-full p-2.5 border rounded-xl bg-gray-50 font-medium text-gray-900">
                       <option value="legal_advice">Legal Advice</option>
                       <option value="legal_notice">Legal Notice</option>
@@ -1177,7 +1197,7 @@ export default function Consultations() {
                   </div>
                   <div>
                     <label className="font-semibold text-gray-700 mb-1 block">Mode</label>
-                    <select value={createForm.consultationMode} onChange={e => setCreateForm({ ...createForm, consultationMode: e.target.value })}
+                    <select value={createForm.consultationMode} onChange={e => updateCreateService(createForm.serviceType, e.target.value)}
                       className="w-full p-2.5 border rounded-xl bg-gray-50 font-medium text-gray-900">
                       <option value="chat">Chat</option>
                       <option value="voice">Voice Call</option>

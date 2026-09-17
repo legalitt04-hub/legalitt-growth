@@ -39,7 +39,7 @@ const AdvocateCard = ({ advocate, onViewProfile, onBookNow }) => {
         <View style={styles.ratingRow}>
           <Ionicons name="star" size={14} color={COLORS.star} />
           <Text style={styles.rating}>
-            {advocate.rating?.average || '4.5'}
+            {advocate.rating?.count > 0 ? Number(advocate.rating.average || 0).toFixed(1) : 'No rating'}
           </Text>
           <Text style={styles.ratingCount}>
             ({advocate.rating?.count || 0} review)

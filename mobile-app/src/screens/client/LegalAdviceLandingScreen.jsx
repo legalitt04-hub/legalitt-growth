@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import SafeScreen from '../../components/SafeScreen';
 import { LEGAL_THEME } from '../../constants/legalAdviceTheme';
 import { LogoHeader } from '../../components/legalAdvice/LogoHeader';
@@ -86,16 +87,16 @@ export default function LegalAdviceLandingScreen({ navigation }) {
             Connect with experienced legal professionals and receive personalized guidance for your legal concerns.
           </Text>
 
-          {/* HAPPY CLIENTS BADGE */}
+          {/* Trust badge */}
           <View style={styles.badgeContainer}>
             <View style={styles.avatarRow}>
-              <Image source={{ uri: 'https://i.pravatar.cc/100?img=33' }} style={[styles.avatar, { zIndex: 3 }]} />
-              <Image source={{ uri: 'https://i.pravatar.cc/100?img=12' }} style={[styles.avatar, { zIndex: 2, marginLeft: -12 }]} />
-              <Image source={{ uri: 'https://i.pravatar.cc/100?img=47' }} style={[styles.avatar, { zIndex: 1, marginLeft: -12 }]} />
+              <View style={[styles.avatar, { alignItems: 'center', justifyContent: 'center' }]}>
+                <Ionicons name="shield-checkmark" size={22} color={LEGAL_THEME.colors.primaryGold} />
+              </View>
             </View>
             <View style={styles.badgeTextCol}>
-              <Text style={styles.badgeCountText}>10K+ Happy Clients</Text>
-              <Text style={styles.badgeSubText}>Trusted across India</Text>
+              <Text style={styles.badgeCountText}>Verified advocates</Text>
+              <Text style={styles.badgeSubText}>Secure consultation workflow</Text>
             </View>
           </View>
         </View>

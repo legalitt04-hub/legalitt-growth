@@ -10,7 +10,6 @@ import * as DocumentPicker from 'expo-document-picker';
 import api, { caseAPI, bookingAPI, chatAPI, legalAdviceAPI, uploadAPI } from '../../services/api';
 import { COLORS } from '../../constants/theme';
 import { formatDate, formatINR } from '../../utils/helpers';
-import { MOCK_ADVOCATE_CASES } from '../../data/advocateCasesMock';
 
 const Section = ({ title, actionIcon, onActionPress, children }) => (
   <View style={styles.section}>
@@ -99,10 +98,10 @@ const CaseDetailScreen = ({ route, navigation }) => {
         return;
       }
     } catch (err) {
-      console.log('Case API getOne error, falling back to mock or booking data:', err);
+      console.log('Case API getOne error, falling back to the assigned booking payload:', err);
     }
 
-    // Real booking fallback (no mock data)
+    // Use the linked booking when a dedicated case record is unavailable.
     if (booking) {
       const svcLabel = {
         property_research: 'Property Research',
@@ -344,8 +343,8 @@ const CaseDetailScreen = ({ route, navigation }) => {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Case Info */}
         <View style={styles.cardHeader}>
-          <Text style={styles.caseNumberText}>Case No: {legalCase.caseNumber || 'CIVIL/TBD/2026'}</Text>
-          <Text style={styles.courtNameText}>Court: {legalCase.courtName || 'District Court Bhopal'}</Text>
+          <Text style={styles.caseNumberText}>Case No: {legalCase.caseNumber || 'Not assigned'}</Text>
+          <Text style={styles.courtNameText}>Court: {legalCase.courtName || 'Not assigned'}</Text>
           <Text style={styles.descText}>{legalCase.description || 'No description provided.'}</Text>
           
           {!legalCase.isBooking && (
@@ -527,27 +526,39 @@ const CaseDetailScreen = ({ route, navigation }) => {
             )}
 
             {/* Legal Notice Response Workflow Module */}
-            <Section title="⚖️ Legal Notice & Response">
+            {(['legal_notice', 'legal_advice'].includes(legalCase.serviceType) || ['legal_notice', 'legal_advice'].includes(booking?.serviceType)) && (
+            <Section title={legalCase.serviceType === 'legal_advice' ? '⚖️ Legal Advice Workspace' : '⚖️ Legal Notice & Response'}>
               <View style={styles.legalNoticePromoCard}>
                 <View style={styles.legalNoticePromoLeft}>
-                  <Text style={styles.legalNoticePromoTitle}>Legal Notice Response</Text>
+                  <Text style={styles.legalNoticePromoTitle}>
+                    {legalCase.serviceType === 'legal_advice' ? 'Legal Advice & Opinion' : 'Legal Notice Response'}
+                  </Text>
 
                   <Text style={styles.legalNoticePromoSub}>
-                    Prepare, draft with AI, sign & submit formal response
+                    {legalCase.serviceType === 'legal_advice'
+                      ? 'Review documents, draft advice with AI, and share the final opinion'
+                      : 'Prepare, draft with AI, sign & submit formal response'}
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={styles.legalNoticePromoBtn}
                   activeOpacity={0.8}
                   onPress={() => {
+                    const legalNoticeBookingId = booking?._id || legalCase.bookingId || (legalCase.isBooking ? legalCase._id : null);
+                    if (!legalNoticeBookingId) {
+                      Alert.alert('Booking unavailable', 'Open this workflow from an assigned legal notice booking.');
+                      return;
+                    }
                     const doc = legalCase.documents?.[0] || clientDocs?.[0] || null;
                     navigation.navigate('LegalNoticeResponse', {
-                      caseId: legalCase._id,
+                      bookingId: legalNoticeBookingId,
+                      caseId: legalNoticeBookingId,
                       clientId: legalCase.client?._id,
-                      clientName: legalCase.client?.name || 'Client',
-                      caseTitle: legalCase.issue || legalCase.title || 'Legal Notice',
+                      clientName: legalCase.client?.name,
+                      caseTitle: legalCase.issue || legalCase.title,
+                      serviceType: legalCase.serviceType || booking?.serviceType || 'legal_notice',
                       documentUrl: doc?.url,
-                      documentName: doc?.name || 'Original_Notice.pdf',
+                      documentName: doc?.name,
                       advocateDocs: legalCase.advocateDocuments || [],
                     });
                   }}
@@ -556,6 +567,7 @@ const CaseDetailScreen = ({ route, navigation }) => {
                 </TouchableOpacity>
               </View>
             </Section>
+            )}
           </>
         )}
 

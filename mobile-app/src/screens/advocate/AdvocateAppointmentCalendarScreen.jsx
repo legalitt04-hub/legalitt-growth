@@ -121,11 +121,13 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
     try {
       // 1. Fetch Advocate Profile for Availability & Status
       let isOnlineStatus = true;
+      let remoteProfile = null;
       try {
         const profileRes = await advocateAPI.getMyProfile();
         if (profileRes.data?.success && profileRes.data?.data) {
-          if (typeof profileRes.data.data.isOnline === 'boolean') {
-            isOnlineStatus = profileRes.data.data.isOnline;
+          remoteProfile = profileRes.data.data;
+          if (typeof remoteProfile.isOnline === 'boolean') {
+            isOnlineStatus = remoteProfile.isOnline;
           }
         }
       } catch (profErr) {
@@ -153,111 +155,26 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
         console.log('Bookings fetch note:', bookErr.message);
       }
 
-      // Default sample bookings if live database has none for seamless preview
-      if (bookingsList.length === 0) {
-        const todayStr = toDateKey(new Date());
-        bookingsList = [
-          {
-            _id: 'BOOK-001',
-            bookingNumber: 'LA 2026-0813-001',
-            date: todayStr,
-            time: '10:00 AM - 10:30 AM',
-            timeDisplay: '10:00 AM',
-            issue: 'Divorce Consultation',
-            consultationType: 'Video Consultation',
-            duration: '30 min',
-            status: 'confirmed',
-            amount: 1500,
-            client: {
-              name: 'Rahul Sharma',
-              phone: '+91 98765 43210',
-              avatar: null,
-            },
-            caseTitle: 'Divorce Matter',
-          },
-          {
-            _id: 'BOOK-002',
-            bookingNumber: 'LA 2026-0813-002',
-            date: todayStr,
-            time: '12:00 PM - 12:30 PM',
-            timeDisplay: '12:00 PM',
-            issue: 'Property Dispute',
-            consultationType: 'Video Consultation',
-            duration: '30 min',
-            status: 'confirmed',
-            amount: 2000,
-            client: {
-              name: 'Akash Sinha',
-              phone: '+91 98111 22334',
-              avatar: null,
-            },
-            caseTitle: 'Property Partition Suit',
-          },
-          {
-            _id: 'BOOK-003',
-            bookingNumber: 'LA 2026-0813-003',
-            date: todayStr,
-            time: '04:00 PM - 04:30 PM',
-            timeDisplay: '04:00 PM',
-            issue: 'Legal Advice',
-            consultationType: 'Video Consultation',
-            duration: '30 min',
-            status: 'pending',
-            amount: 1200,
-            client: {
-              name: 'Priya Mehta',
-              phone: '+91 99222 33445',
-              avatar: null,
-            },
-            caseTitle: 'Corporate Agreement Review',
-          },
-        ];
-      }
       setAllBookings(bookingsList);
 
-      // 3. Load Saved Court Hearings from Storage
-      try {
-        const savedHearings = await AsyncStorage.getItem(HEARINGS_STORAGE_KEY);
-        if (savedHearings) {
-          const parsed = JSON.parse(savedHearings);
-          if (Array.isArray(parsed)) {
-            setCourtHearings(parsed);
-          }
-        } else {
-          // Default initial reference hearing matching PDF
-          const todayStr = toDateKey(new Date());
-          const defaultHearings = [
-            {
-              id: 'HEAR-001',
-              courtType: 'High Court',
-              courtName: 'High Court of Madhya Pradesh',
-              courtLocation: 'Jabalpur Bench',
-              courtroom: 'Courtroom No. 12',
-              caseTitle: 'Sharma vs. State',
-              caseNumber: 'WP/1234/2026',
-              hearingDate: todayStr,
-              hearingTime: '09:00 AM',
-              advocateRole: 'Lead Counsel',
-              status: 'Upcoming',
-              notes: 'First hearing for writ petition stay arguments.',
-              reminders: ['1 Day Before', '3 Hours Before'],
-            },
-          ];
-          setCourtHearings(defaultHearings);
-          await AsyncStorage.setItem(HEARINGS_STORAGE_KEY, JSON.stringify(defaultHearings));
-        }
-      } catch (hErr) {
-        console.log('Hearings storage note:', hErr.message);
-      }
+      // 3. Court hearings are stored on the advocate profile and are visible to admin calendar.
+      setCourtHearings((remoteProfile?.courtHearings || []).map(hearing => ({
+        ...hearing,
+        id: hearing._id || hearing.id,
+        hearingDate: toDateKey(hearing.hearingDate),
+      })));
 
-      // 4. Load Saved Availability Schedule
-      try {
-        const savedSchedule = await AsyncStorage.getItem(AVAILABILITY_STORAGE_KEY);
-        if (savedSchedule) {
-          const parsedSched = JSON.parse(savedSchedule);
-          setWorkingSchedule(prev => ({ ...prev, ...parsedSched }));
-        }
-      } catch (sErr) {}
+      // 4. Availability is also backend-backed; local storage remains an offline cache only.
+      if (remoteProfile?.availability?.length) {
+        const shortDay = day => day.slice(0, 3);
+        const firstSlot = remoteProfile.availability.find(day => day.slots?.length)?.slots?.[0];
+        setWorkingSchedule(prev => ({
+          ...prev,
+          enabledDays: remoteProfile.availability.filter(day => day.slots?.length).map(day => shortDay(day.day)),
+          startHour: firstSlot?.startTime || prev.startHour,
+          endHour: firstSlot?.endTime || prev.endHour,
+        }));
+      }
 
     } catch (err) {
       console.log('Calendar fetch note:', err?.message);
@@ -290,9 +207,10 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
         JSON.stringify({ availableForConsultations: newValue })
       );
       // Attempt backend sync
-      await advocateAPI.upsertProfile({ isOnline: newValue }).catch(() => {});
+      await advocateAPI.upsertProfile({ isOnline: newValue });
     } catch (e) {
-      // Silently continue
+      setAvailableForConsultations(!newValue);
+      Alert.alert('Update Failed', e?.response?.data?.message || 'Could not update consultation availability.');
     }
   };
 
@@ -531,6 +449,10 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
       Alert.alert('Validation Error', 'Please enter the Court Name.');
       return;
     }
+    if (!hearingForm.courtLocation.trim()) {
+      Alert.alert('Validation Error', 'Please enter the Court Location.');
+      return;
+    }
     if (!hearingForm.caseTitle.trim()) {
       Alert.alert('Validation Error', 'Please enter the Case Title.');
       return;
@@ -541,30 +463,31 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
     }
 
     const newHearing = {
-      id: `HEAR-${Date.now()}`,
       courtType: hearingForm.courtType,
       courtName: hearingForm.courtName.trim(),
       courtLocation: hearingForm.courtLocation.trim(),
-      courtroom: hearingForm.courtroom.trim() || 'Courtroom 1',
+      courtroom: hearingForm.courtroom.trim(),
       caseTitle: hearingForm.caseTitle.trim(),
       caseNumber: hearingForm.caseNumber.trim(),
       hearingDate: hearingForm.hearingDate || selectedDateKey,
-      hearingTime: hearingForm.hearingTime || '09:00 AM',
+      hearingTime: hearingForm.hearingTime,
       advocateRole: hearingForm.advocateRole,
       status: 'Upcoming',
       notes: hearingForm.notes.trim(),
       reminders: hearingForm.reminders,
     };
 
-    const updated = [newHearing, ...courtHearings];
-    setCourtHearings(updated);
-    setShowAddHearingModal(false);
-
     try {
+      const updated = [newHearing, ...courtHearings];
+      const response = await advocateAPI.upsertProfile({ courtHearings: updated });
+      const saved = response.data?.data?.courtHearings || updated;
+      setCourtHearings(saved.map(hearing => ({ ...hearing, id: hearing._id || hearing.id, hearingDate: toDateKey(hearing.hearingDate) })));
       await AsyncStorage.setItem(HEARINGS_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {}
-
-    Alert.alert('Success', 'Court hearing has been added to your schedule.');
+      setShowAddHearingModal(false);
+      Alert.alert('Success', 'Court hearing has been added to your schedule.');
+    } catch (e) {
+      Alert.alert('Save Failed', e?.response?.data?.message || 'Could not save the court hearing.');
+    }
   };
 
   // ────────────────── MANAGE AVAILABILITY HANDLERS ──────────────────
@@ -579,15 +502,21 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
   };
 
   const handleSaveAvailabilitySchedule = async () => {
-    setShowManageAvailabilityModal(false);
     try {
+      const dayNames = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
+      const availability = workingSchedule.enabledDays.map(day => ({
+        day: dayNames[day],
+        slots: [{ startTime: workingSchedule.startHour, endTime: workingSchedule.endHour, isBooked: false }],
+      }));
+      await advocateAPI.upsertProfile({ availability });
       await AsyncStorage.setItem(
         AVAILABILITY_STORAGE_KEY,
         JSON.stringify(workingSchedule)
       );
+      setShowManageAvailabilityModal(false);
       Alert.alert('Success', 'Availability working hours updated successfully.');
     } catch (e) {
-      Alert.alert('Notice', 'Availability preferences saved.');
+      Alert.alert('Save Failed', e?.response?.data?.message || 'Could not update availability hours.');
     }
   };
 
@@ -863,7 +792,7 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
                       <View style={styles.appointmentTopRow}>
                         <Text style={styles.appointmentClientName}>{clientName}</Text>
                         <Text style={styles.appointmentTimeText}>
-                          {item.timeDisplay || item.time || '10:00 AM'}
+                          {item.timeDisplay || item.time || 'Time not set'}
                         </Text>
                       </View>
 
@@ -873,7 +802,7 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
 
                       <View style={styles.appointmentBottomRow}>
                         <Text style={styles.appointmentMetaText}>
-                          {item.consultationType || 'Video Consultation'} • {item.duration || '30 min'}
+                          {item.consultationType || 'Consultation'}{item.duration ? ` • ${item.duration}` : ''}
                         </Text>
                         <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
                           <Text style={[styles.statusBadgeText, { color: statusCfg.text }]}>
@@ -1043,10 +972,10 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
                     </Text>
                   </View>
                   <Text style={styles.detailsClientName}>
-                    {selectedAppointment.client?.name || 'Rahul Sharma'}
+                    {selectedAppointment.client?.name || 'Client'}
                   </Text>
                   <Text style={styles.detailsIssueSubtitle}>
-                    {selectedAppointment.issue || selectedAppointment.caseTitle || 'Divorce Consultation'}
+                    {selectedAppointment.issue || selectedAppointment.caseTitle || 'Legal consultation'}
                   </Text>
                 </View>
 
@@ -1055,35 +984,35 @@ export default function AdvocateAppointmentCalendarScreen({ navigation }) {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Date</Text>
                     <Text style={styles.detailValue}>
-                      {formatDate(selectedAppointment.date || new Date(), 'full')}
+                      {selectedAppointment.date ? formatDate(selectedAppointment.date, 'full') : 'Not set'}
                     </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Time</Text>
                     <Text style={styles.detailValue}>
-                      {selectedAppointment.time || selectedAppointment.timeDisplay || '10:00 AM - 10:30 AM'}
+                      {selectedAppointment.time || selectedAppointment.timeDisplay || 'Not set'}
                     </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Consultation</Text>
                     <Text style={styles.detailValue}>
-                      {selectedAppointment.consultationType || 'Video Call'}
+                      {selectedAppointment.consultationType || 'Consultation'}
                     </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Duration</Text>
                     <Text style={styles.detailValue}>
-                      {selectedAppointment.duration || '30 Minutes'}
+                      {selectedAppointment.duration || 'Not set'}
                     </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Booking #</Text>
                     <Text style={styles.detailValue}>
-                      {selectedAppointment.bookingNumber || selectedAppointment._id || 'LA 2026-0813-001'}
+                      {selectedAppointment.bookingNumber || selectedAppointment._id || 'Not available'}
                     </Text>
                   </View>
 

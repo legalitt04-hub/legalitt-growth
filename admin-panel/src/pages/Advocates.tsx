@@ -18,7 +18,7 @@ interface Advocate {
   isVerified: boolean;
   rating?: { average: number; count: number };
   consultationFee?: number;
-  location?: { address?: { city?: string; state?: string; street?: string } };
+  location?: { coordinates?: [number, number]; address?: { city?: string; state?: string; street?: string } };
   experience?: number;
   bio?: string;
   about?: string;  // legacy alias for bio
@@ -45,12 +45,12 @@ const SPECIALIZATION_OPTIONS = [
 const EMPTY_FORM = {
   name: '', email: '', phone: '', password: '',
   barCouncilNumber: '', specializations: [] as string[], city: '', state: '',
-  consultationFee: '', experience: '',
+  consultationFee: '', experience: '', latitude: '', longitude: '',
 };
 
 export default function Advocates() {
   const [advocates, setAdvocates] = useState<Advocate[]>([]);
-  const [counts, setCounts] = useState({ pending: 0, under_review: 0, approved: 0 });
+  const [counts, setCounts] = useState({ total: 0, pending: 0, under_review: 0, approved: 0, suspended: 0, rejected: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -84,7 +84,7 @@ export default function Advocates() {
       const { data } = await api.get('/admin/pending-advocates', { params });
       setAdvocates(data.data || []);
       if (data.counts) setCounts(data.counts);
-      setTotal(data.pagination?.total || 0);
+      setTotal(data.counts?.total ?? data.pagination?.total ?? 0);
       setTotalPages(data.pagination?.pages || 1);
     } catch { setAdvocates([]); }
     finally { setLoading(false); }
@@ -93,7 +93,7 @@ export default function Advocates() {
   useEffect(() => { fetchAdvocates(); }, [fetchAdvocates]);
 
   const handleCreate = async () => {
-    if (!form.name || !form.email || !form.password) return alert('Name, email, password required.');
+    if (!form.name || !form.email || !form.password || !form.barCouncilNumber || !form.city || form.consultationFee === '' || form.experience === '' || form.latitude === '' || form.longitude === '' || !form.specializations?.length) return alert('Complete all required personal, professional, specialization, city, and coordinate fields.');
     setSaving(true);
     try {
       await api.post('/admin/advocates', {
@@ -105,8 +105,10 @@ export default function Advocates() {
         specializations: form.specializations,
         city: form.city,
         state: form.state,
-        consultationFee: Number(form.consultationFee) || 500,
-        experience: Number(form.experience) || 0,
+        consultationFee: Number(form.consultationFee),
+        experience: Number(form.experience),
+        lat: Number(form.latitude),
+        lng: Number(form.longitude),
       });
       setShowForm(false);
       setForm(EMPTY_FORM);
@@ -148,25 +150,12 @@ export default function Advocates() {
     }
   };
 
-  const handleUpdateRating = async (id: string, ratingVal: number) => {
-    try {
-      await api.patch(`/admin/advocates/${id}/rating`, { average: ratingVal, count: 5 });
-      alert(`✅ Advocate rating updated to ${ratingVal} ⭐`);
-      if (selectedAdv) {
-        setSelectedAdv(prev => prev ? { ...prev, rating: { average: ratingVal, count: 5 } } : null);
-      }
-      fetchAdvocates();
-    } catch (e: any) {
-      alert(e?.response?.data?.message || 'Failed to update rating');
-    }
-  };
-
   const handleDelete = async (id: string) => {
     try {
       await api.delete(`/admin/advocates/${id}`);
       setDeleteId(null);
       fetchAdvocates();
-    } catch (e: any) { console.error('Delete failed:', e); }
+    } catch (e: any) { alert(e?.response?.data?.message || 'Failed to delete advocate.'); }
   };
 
   const openEditAdv = (adv: Advocate) => {
@@ -185,6 +174,8 @@ export default function Advocates() {
       consultationFee: adv.consultationFee || '',
       experience: adv.experience || '',
       bio: adv.bio || '',
+      latitude: adv.location?.coordinates?.[1] ?? '',
+      longitude: adv.location?.coordinates?.[0] ?? '',
     });
   };
 
@@ -204,6 +195,8 @@ export default function Advocates() {
       if (editForm.consultationFee !== '') fd.append('consultationFee', String(editForm.consultationFee));
       if (editForm.experience !== '') fd.append('experience', String(editForm.experience));
       if (editForm.bio !== undefined) fd.append('bio', editForm.bio);
+      if (editForm.latitude !== '') fd.append('lat', String(editForm.latitude));
+      if (editForm.longitude !== '') fd.append('lng', String(editForm.longitude));
       if (editAvatarFile) fd.append('avatar', editAvatarFile);
       await api.patch(`/admin/advocates/${editAdv._id}`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -219,6 +212,17 @@ export default function Advocates() {
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (!extension || !['csv', 'xls', 'xlsx'].includes(extension)) {
+      alert('Choose a CSV, XLS or XLSX file.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Bulk upload files must be 5 MB or smaller.');
+      e.target.value = '';
+      return;
+    }
 
     const fd = new FormData();
     fd.append('file', file);
@@ -228,7 +232,7 @@ export default function Advocates() {
       const res = await api.post('/admin/advocates/bulk-upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const data = res.data?.data;
+      const data = res.data?.data || {};
       setUploadResult({
         successCount: data.successCount || 0,
         skippedCount: data.skippedCount || 0,
@@ -243,14 +247,21 @@ export default function Advocates() {
     }
   };
 
+  const downloadBulkTemplate = () => {
+    const headers = ['name','email','phone','password','barCouncilNumber','specializations','experience','consultationFee','city','state','latitude','longitude','verificationStatus'];
+    const example = ['Advocate Name','advocate@example.com','9876543210','Strong@123','MP/1234/2026','"Civil Law,Family Law"','5','1000','Bhopal','Madhya Pradesh','23.2599','77.4126','pending'];
+    const blob = new Blob([[headers.join(','), example.join(',')].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'advocate-bulk-upload-template.csv'; link.click(); URL.revokeObjectURL(url);
+  };
+
   const exportCSV = () => {
     const rows = [['Name', 'Email', 'Bar Council', 'Status', 'City', 'Fee', 'Rating']];
     advocates.forEach(a => rows.push([
-      a.user?.name || 'Advocate', a.user?.email || 'N/A', a.barCouncilId || '',
+      a.user?.name || 'Advocate', a.user?.email || 'N/A', a.barCouncilNumber || a.barCouncilId || '',
       a.verificationStatus, a.location?.address?.city || '',
       String(a.consultationFee || 0), String(a.rating?.average || 0),
     ]));
-    const csv = rows.map(r => r.join(',')).join('\n');
+    const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'advocates.csv'; a.click();
@@ -272,6 +283,7 @@ export default function Advocates() {
             ref={bulkUploadRef}
             onChange={handleBulkUpload}
           />
+          <button onClick={downloadBulkTemplate} className="flex items-center gap-2 px-3 py-2 border border-gray-200 text-gray-600 text-sm rounded-xl hover:bg-gray-50"><Download className="w-4 h-4" /> Template</button>
           <button onClick={() => bulkUploadRef.current?.click()} disabled={uploading} className="flex items-center gap-2 px-3 py-2 border border-gray-200 text-gray-600 text-sm rounded-xl hover:bg-gray-50 disabled:opacity-50">
             <Upload className="w-4 h-4" /> {uploading ? 'Uploading...' : 'Bulk Upload'}
           </button>
@@ -286,11 +298,12 @@ export default function Advocates() {
       {/* Status Filter Tabs */}
       <div className="flex gap-2 flex-wrap bg-white rounded-2xl border border-gray-100 p-2 shadow-sm">
         {[
-          { key: '', label: 'All Advocates', count: total },
+          { key: '', label: 'All Advocates', count: counts.total },
           { key: 'pending', label: 'Pending Approval', count: counts.pending, badge: 'bg-amber-500 text-white' },
           { key: 'under_review', label: 'Under Review', count: counts.under_review, badge: 'bg-blue-500 text-white' },
           { key: 'approved', label: 'Approved', count: counts.approved, badge: 'bg-emerald-500 text-white' },
-          { key: 'suspended', label: 'Suspended' },
+          { key: 'suspended', label: 'Suspended', count: counts.suspended, badge: 'bg-gray-500 text-white' },
+          { key: 'rejected', label: 'Rejected', count: counts.rejected, badge: 'bg-red-500 text-white' },
         ].map(tab => (
           <button
             key={tab.key}
@@ -374,9 +387,9 @@ export default function Advocates() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        {adv.rating?.average ? (
-                          <span className="flex items-center gap-1 text-amber-600 font-semibold"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{adv.rating.average.toFixed(1)}</span>
-                        ) : '—'}
+                        {adv.rating?.count ? (
+                          <span className="flex items-center gap-1 text-amber-600 font-semibold" title={`${adv.rating.count} verified reviews`}><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{Number(adv.rating.average).toFixed(1)} <span className="text-gray-400 font-normal">({adv.rating.count})</span></span>
+                        ) : <span className="text-gray-400">No reviews</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">{adv.location?.address?.city || '—'}</td>
                       <td className="px-4 py-3 text-xs font-semibold text-gray-800">₹{adv.consultationFee || 0}</td>
@@ -460,24 +473,10 @@ export default function Advocates() {
               {/* Admin Rating Override Control */}
               <div className="bg-amber-50/70 border border-amber-200/60 rounded-2xl p-3.5 mb-4 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-bold text-amber-900 uppercase tracking-wider">Set Rating (Admin Control)</p>
+                  <p className="text-xs font-bold text-amber-900 uppercase tracking-wider">Verified Client Rating</p>
                   <p className="text-xs text-amber-700 font-medium mt-0.5">
-                    Current: <span className="font-extrabold text-amber-800">⭐ {selectedAdv.rating?.average ? selectedAdv.rating.average.toFixed(1) : '0.0'}</span>
+                    {selectedAdv.rating?.count ? <><span className="font-extrabold text-amber-800">⭐ {Number(selectedAdv.rating.average).toFixed(1)}</span> from {selectedAdv.rating.count} reviews</> : 'No verified reviews yet'}
                   </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedAdv.rating?.average || 5.0}
-                    onChange={(e) => handleUpdateRating(selectedAdv._id, parseFloat(e.target.value))}
-                    className="px-3 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-extrabold text-amber-700 focus:outline-none shadow-sm cursor-pointer"
-                  >
-                    <option value="5.0">5.0 ⭐⭐⭐⭐⭐ (Excellent)</option>
-                    <option value="4.8">4.8 ⭐⭐⭐⭐★ (Very Good)</option>
-                    <option value="4.5">4.5 ⭐⭐⭐⭐☆ (Good)</option>
-                    <option value="4.0">4.0 ⭐⭐⭐⭐ (Average)</option>
-                    <option value="3.5">3.5 ⭐⭐⭐ (Fair)</option>
-                    <option value="3.0">3.0 ⭐⭐⭐ (Needs Improvement)</option>
-                  </select>
                 </div>
               </div>
 
@@ -667,7 +666,7 @@ export default function Advocates() {
                 {/* Location */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">City</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">City *</label>
                     <input value={form.city || ''} onChange={e => setForm((p: any) => ({ ...p, city: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Bhopal" />
                   </div>
@@ -675,6 +674,19 @@ export default function Advocates() {
                     <label className="block text-xs font-semibold text-gray-700 mb-1">State</label>
                     <input value={form.state || ''} onChange={e => setForm((p: any) => ({ ...p, state: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Madhya Pradesh" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Latitude *</label>
+                    <input type="number" step="any" value={form.latitude || ''} onChange={e => setForm((p: any) => ({ ...p, latitude: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="23.2599" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Longitude *</label>
+                    <input type="number" step="any" value={form.longitude || ''} onChange={e => setForm((p: any) => ({ ...p, longitude: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="77.4126" />
                   </div>
                 </div>
 
@@ -809,6 +821,18 @@ export default function Advocates() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Street / Area</label>
                   <input value={editForm.street || ''} onChange={e => setEditForm((p: any) => ({ ...p, street: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" placeholder="Near High Court, Vijay Nagar..." />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Latitude</label>
+                    <input type="number" step="any" value={editForm.latitude ?? ''} onChange={e => setEditForm((p: any) => ({ ...p, latitude: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Longitude</label>
+                    <input type="number" step="any" value={editForm.longitude ?? ''} onChange={e => setEditForm((p: any) => ({ ...p, longitude: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                  </div>
                 </div>
 
                 {/* Bio */}

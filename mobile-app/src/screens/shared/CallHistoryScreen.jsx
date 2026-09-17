@@ -4,11 +4,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  StatusBar, RefreshControl, ActivityIndicator, Image,
+  StatusBar, RefreshControl, ActivityIndicator, Image, Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { callsAPI } from '../../services/api';
+import { callsAPI, bookingAPI } from '../../services/api';
+import { initiateCall } from '../../services/socket';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 
@@ -61,33 +62,33 @@ const CallItem = ({ item, myRole }) => {
   const name   = other?.name || 'Unknown';
   const avatar = other?.avatar || null;
   const initial = name[0]?.toUpperCase() || '?';
-  const { getSocket } = require('../../services/socket');
   const { useNavigation } = require('@react-navigation/native');
   const navigation = useNavigation();
 
   const handleCallBack = async () => {
-    const { connectSocket } = require('../../services/socket');
-    const socket = getSocket() || await connectSocket();
-    if (!socket || !item.bookingId) return;
-
-    // Use a unique room ID
-    const newRoomId = `callback-${item.bookingId}-${Date.now()}`;
-    
-    socket.emit('initiate_call', {
-      bookingId: item.bookingId,
-      zegoRoomId: newRoomId,
-      mode: item.mode || 'voice',
-    });
-
-    navigation.navigate(myRole === 'advocate' ? 'AdvocateCall' : 'VideoCall', {
-      zegoRoomId: newRoomId,
-      mode: item.mode || 'voice',
-      bookingId: item.bookingId,
-      clientName: name,
-      clientAvatar: avatar,
-      clientId: myRole === 'advocate' ? other?._id : item.clientId,
-      advocateUserId: myRole === 'advocate' ? item.advocateUser?._id : other?._id,
-    });
+    const bookingId = item.booking?._id || item.bookingId;
+    if (!bookingId) return Alert.alert('Call unavailable', 'This call has no linked booking.');
+    try {
+      const { data } = await bookingAPI.canJoinCall(bookingId);
+      if (data?.canJoin === false) throw new Error(data.message || 'The call window is closed.');
+      const config = data?.data || {};
+      await initiateCall({
+        bookingId,
+        zegoRoomId: config.zegoRoomId,
+        mode: item.mode || 'voice',
+      });
+      navigation.navigate(myRole === 'advocate' ? 'AdvocateCall' : 'VideoCall', {
+        ...config,
+        mode: item.mode || 'voice',
+        bookingId,
+        clientName: name,
+        clientAvatar: avatar,
+        clientId: item.client?._id || item.clientId,
+        advocateUserId: item.advocateUser?._id,
+      });
+    } catch (err) {
+      Alert.alert('Call unavailable', err.response?.data?.message || err.message || 'Could not start this call.');
+    }
   };
 
   return (

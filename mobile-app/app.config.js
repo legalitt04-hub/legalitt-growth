@@ -107,14 +107,8 @@ export default ({ config }) => ({
       },
       API_URL: process.env.API_URL || 'https://legalitt-growth.onrender.com/api/v1',
       SOCKET_URL: process.env.SOCKET_URL || 'https://legalitt-growth.onrender.com',
-      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-      GEMINI_API_URL: process.env.GEMINI_API_URL,
       GOOGLE_WEB_CLIENT_ID: process.env.GOOGLE_WEB_CLIENT_ID,
       GOOGLE_ANDROID_CLIENT_ID: process.env.GOOGLE_ANDROID_CLIENT_ID,
-      MOBILE_APP_SECRET: process.env.MOBILE_APP_SECRET,
-      // ZEGOCLOUD — Video/Voice/Chat
-      ZEGO_APP_ID: parseInt(process.env.ZEGO_APP_ID || '0', 10),
-      ZEGO_APP_SIGN: process.env.ZEGO_APP_SIGN || '',
     }
   }
 });

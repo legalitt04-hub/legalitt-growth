@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import { useEffect, useRef, useLayoutEffect } from 'react';
 import { Platform, AppState } from 'react-native';
+import Constants from 'expo-constants';
 import { authAPI } from '../services/api';
 import { getSocket, connectSocket } from '../services/socket';
 
@@ -39,6 +40,28 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
 
     const register = async () => {
       try {
+        // Create Android channels before token registration so remote messages
+        // have valid high-priority destinations from the first launch.
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('calls', {
+            name: 'Incoming Calls',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 500, 200, 500],
+            lightColor: '#B09C85',
+            sound: 'default',
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            bypassDnd: true,
+            showBadge: true,
+          });
+          await Notifications.setNotificationChannelAsync('messages', {
+            name: 'Messages',
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250],
+            lightColor: '#10B981',
+            sound: 'default',
+          });
+        }
+
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
 
@@ -54,36 +77,21 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
 
         // Pass projectId explicitly so it works in both EAS dev client and production
         const projectId = Constants.expoConfig?.extra?.eas?.projectId
-          || Constants.expoConfig?.extra?.projectId
-          || 'c7cbf65c-ddc9-4089-afc6-30f135b6d5e8';
+          || Constants.easConfig?.projectId
+          || Constants.expoConfig?.extra?.projectId;
+
+        if (!projectId) {
+          console.warn('[Push] Expo project ID is missing');
+          return;
+        }
 
         const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
         const token = tokenData.data;
-        console.log('[Push] ✅ Expo push token:', token);
+        console.log('[Push] ✅ Device registered for notifications');
 
         // Save token to backend so server can wake the device when app is killed
         try { await authAPI.updateFCMToken?.(token); } catch (_) {}
 
-        // Android: high-priority channels (MAX for calls so it shows as heads-up)
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('calls', {
-            name: 'Incoming Calls',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 500, 200, 500],
-            lightColor: '#B09C85',
-            sound: 'default',
-            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-            bypassDnd: true,            // show even in Do Not Disturb
-            showBadge: true,
-          });
-          await Notifications.setNotificationChannelAsync('messages', {
-            name: 'Messages',
-            importance: Notifications.AndroidImportance.HIGH,
-            vibrationPattern: [0, 250],
-            lightColor: '#10B981',
-            sound: 'default',
-          });
-        }
       } catch (err) {
         console.warn('[Push] Registration failed:', err?.message);
       }
@@ -114,7 +122,7 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
             ...data,
             callerName: data.clientName || data.callerName || 'Caller',
             callerAvatar: data.clientAvatar || data.callerAvatar || null,
-            zegoToken: data.advocateToken || data.clientToken || null,
+            zegoToken: data.zegoToken || data.advocateToken || data.clientToken || null,
           });
         } else if (data.bookingId) {
           nav.navigate('MyBookings');
@@ -142,23 +150,6 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
     };
   }, [isAuthenticated]);
 
-  // ── Local push helper ───────────────────────────────────────────────────────
-  const scheduleLocalPush = useCallback(async (title, body, data = {}, channelId = 'messages') => {
-    if (!Notifications) return;
-    try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body,
-          data,
-          sound: 'default',
-          ...(Platform.OS === 'android' ? { channelId } : {}),
-        },
-        trigger: null, // show immediately
-      });
-    } catch (_) {}
-  }, []);
-
   // ── Keep a ref to user so handlers always read the latest value ────────────
   const userRef = useRef(user);
   useLayoutEffect(() => { userRef.current = user; }, [user]);
@@ -169,7 +160,7 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
 
     let socket = null;
     let handleIncomingCall = null;
-    let handleMessageNotif = null;
+    let appStateSubscription = null;
     let retryTimer = null;
     let didSetup = false; // prevent duplicate listener attachment
 
@@ -188,12 +179,15 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
       }
 
       didSetup = true;
+      socket.emit('app_state', { state: AppState.currentState });
+      appStateSubscription = AppState.addEventListener('change', (state) => {
+        socket?.emit('app_state', { state });
+      });
 
       // ── Incoming Call (foreground) ──────────────────────────────────────────
       handleIncomingCall = (data) => {
         console.log('[useNotifications] incoming_call received:', data);
         const u = userRef.current; // always latest user — no stale closure
-        const modeLabel    = data.mode === 'video' ? '📹 Video' : '📞 Voice';
         const callerName   = data.callerName || data.clientName || data.advocateName || 'Someone';
         const callerAvatar = data.callerAvatar || data.clientAvatar || null;
 
@@ -210,7 +204,7 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
               callerAvatar,
               mode:           data.mode || 'video',
               zegoRoomId:     data.zegoRoomId,
-              zegoToken:      data.advocateToken || data.clientToken || null,
+              zegoToken:      data.zegoToken || data.advocateToken || data.clientToken || null,
               zegoAppId:      data.zegoAppId || 0,
               bookingId:      data.bookingId,
               clientId:       data.clientId,
@@ -226,39 +220,11 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
         };
         trySocketNavigate();
 
-        // Local push if app is in background / inactive
-        if (AppState.currentState !== 'active') {
-          scheduleLocalPush(
-            `${modeLabel} Call Incoming!`,
-            `${callerName} is calling you. Open the app to answer.`,
-            {
-              type:           'incoming_call',
-              bookingId:      data.bookingId,
-              zegoRoomId:     data.zegoRoomId,
-              mode:           data.mode,
-              clientId:       data.clientId,
-              advocateUserId: data.advocateUserId,
-              callerName,
-            },
-            'calls'
-          );
-        }
-      };
-
-      // ── New Message (foreground — only if not already in that chat) ─────────
-      handleMessageNotif = (data) => {
-        const senderName = data.message?.senderName || 'New message';
-        const preview    = data.message?.content?.substring(0, 80) || '';
-        scheduleLocalPush(
-          `💬 ${senderName}`,
-          preview,
-          { type: 'new_message', chatId: data.chatId },
-          'messages'
-        );
+        // The backend always sends the high-priority remote call push. Creating
+        // another local notification here caused duplicate incoming-call alerts.
       };
 
       socket.on('incoming_call',        handleIncomingCall);
-      socket.on('message_notification', handleMessageNotif);
       console.log('[useNotifications] ✅ Listeners attached. Socket:', socket.id);
     };
 
@@ -267,12 +233,12 @@ export const useNotifications = (isAuthenticated, navigationRef, user) => {
     return () => {
       // Cancel any pending retry
       if (retryTimer) clearTimeout(retryTimer);
+      appStateSubscription?.remove?.();
       // Remove listeners from socket
       if (socket && handleIncomingCall) {
-        socket.off('incoming_call',        handleIncomingCall);
-        socket.off('message_notification', handleMessageNotif);
+        socket.off('incoming_call', handleIncomingCall);
       }
     };
   // Note: 'user' removed from deps — we use userRef for latest value without re-attaching
-  }, [isAuthenticated, scheduleLocalPush]);
+  }, [isAuthenticated, navigationRef]);
 };

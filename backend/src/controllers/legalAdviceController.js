@@ -7,6 +7,7 @@ const Advocate = require('../models/Advocate');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../utils/logger');
 const { createNotification } = require('../utils/notificationHelper');
+const { Chat, Message } = require('../models/Chat');
 
 /**
  * POST /api/v1/legal-advice/request
@@ -61,14 +62,24 @@ exports.createLegalRequest = async (req, res, next) => {
       return next(new AppError('Please provide at least 10 characters describing your legal concern.', 400));
     }
 
-    // Determine amount based on live Admin ServicePricing or fallback
-    let bookingAmount = amount;
-    if (!bookingAmount) {
-      const ServicePricing = require('../models/ServicePricing');
-      const serviceKey = `${consultationMode}_consultation`;
-      const sp = await ServicePricing.findOne({ serviceId: serviceKey, isActive: true });
-      const fallbackMap = { chat: 499, voice: 799, video: 1199 };
-      bookingAmount = sp?.basePrice || fallbackMap[consultationMode] || 499;
+    // Price is always resolved server-side. Client totals are display-only.
+    const ServicePricing = require('../models/ServicePricing');
+    const serviceKey = ['legal_notice', 'property_research', 'fir_draft', 'document_forensic'].includes(serviceType)
+      ? serviceType
+      : `${consultationMode}_consultation`;
+    const fallbackPrices = {
+      chat_consultation: 499,
+      voice_consultation: 799,
+      video_consultation: 1199,
+      legal_notice: 1199,
+      property_research: 2999,
+      document_forensic: 2999,
+      fir_draft: 499,
+    };
+    const sp = await ServicePricing.findOne({ serviceId: serviceKey, isActive: true }).lean();
+    const bookingAmount = Number(sp?.basePrice ?? fallbackPrices[serviceKey]);
+    if (!Number.isFinite(bookingAmount) || bookingAmount <= 0) {
+      return next(new AppError('This service is not currently available for payment.', 503));
     }
 
     const formattedDocs = Array.isArray(documents)
@@ -196,24 +207,37 @@ exports.confirmLegalPayment = async (req, res, next) => {
   try {
     const { bookingId, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
 
+    if (!bookingId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return next(new AppError('Missing payment verification fields.', 400));
+    }
+
     const booking = await Booking.findById(bookingId);
     if (!booking) return next(new AppError('Booking not found.', 404));
     if (booking.client.toString() !== req.user._id.toString()) {
       return next(new AppError('Not authorized.', 403));
     }
 
-    // Verify Razorpay signature in production (skip for mock/test orders)
-    const isMockOrder = razorpayOrderId?.startsWith('order_mock_') || razorpayPaymentId?.startsWith('pay_mock_') || razorpayPaymentId?.startsWith('pay_test_');
-    if (process.env.NODE_ENV !== 'development' && !isMockOrder) {
-      const crypto = require('crypto');
-      const expectedSig = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-        .digest('hex');
+    if (booking.payment?.status === 'paid') {
+      return res.json({
+        success: true,
+        data: { bookingId: booking._id, status: booking.status, paymentStatus: 'paid' },
+      });
+    }
+    if (booking.payment?.razorpayOrderId !== razorpayOrderId) {
+      return next(new AppError('Order ID mismatch.', 400));
+    }
 
-      if (expectedSig !== razorpaySignature) {
-        return next(new AppError('Payment verification failed. Please contact support.', 400));
-      }
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      return next(new AppError('Payment service is not configured.', 503));
+    }
+    const crypto = require('crypto');
+    const expectedSig = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest('hex');
+
+    if (expectedSig !== razorpaySignature) {
+      return next(new AppError('Payment verification failed. Please contact support.', 400));
     }
 
     // Update payment status
@@ -314,9 +338,160 @@ exports.getRequestDetail = async (req, res, next) => {
       response.myVideoToken = booking.videoRoomToken;
       delete response.advocateVideoToken;
     }
+    if (req.user.role !== 'admin') {
+      delete response.adminNotes;
+      delete response.internalNotes;
+      delete response.archivedBy;
+      delete response.assignedBy;
+      if (response.payment) {
+        response.payment = {
+          amount: response.payment.amount,
+          currency: response.payment.currency,
+          status: response.payment.status,
+          paidAt: response.payment.paidAt,
+        };
+      }
+    }
 
     res.json({ success: true, data: response });
   } catch (err) {
     next(err);
   }
+};
+
+const getAssignedLegalService = async (bookingId, userId) => {
+  const booking = await Booking.findOne({ _id: bookingId, serviceType: { $in: ['legal_notice', 'legal_advice'] } })
+    .populate({ path: 'advocate', select: 'user', populate: { path: 'user', select: 'name' } })
+    .populate('client', 'name');
+  if (!booking) throw new AppError('Legal service booking not found.', 404);
+  if (booking.advocate?.user?._id?.toString() !== userId.toString()) {
+    throw new AppError('Only the assigned advocate can update this legal service.', 403);
+  }
+  if (booking.payment?.status !== 'paid') {
+    throw new AppError('This legal service has not been paid.', 409);
+  }
+  return booking;
+};
+
+exports.generateAdvocateLegalNoticeDraft = async (req, res, next) => {
+  try {
+    const booking = await getAssignedLegalService(req.params.id, req.user._id);
+    const { callAI } = require('../services/aiService');
+    const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const isNotice = booking.serviceType === 'legal_notice';
+    const prompt = `You are a senior Indian advocate drafting ${isNotice ? 'a formal response to a legal notice' : 'a clear written legal advice memorandum'}.
+Client: ${booking.client?.name || 'Client'}
+Matter: ${booking.issue || booking.issueDescription || 'Legal matter'}
+Date: ${today}
+Additional instructions: ${String(req.body.instructions || '').slice(0, 1000)}
+
+${isNotice
+  ? 'Draft a professional response in Indian legal format with a heading, addressee placeholders, subject, numbered paragraphs, reservation of rights, and professional closing.'
+  : 'Draft a professional advice note with facts provided, issues, applicable legal principles, practical options, risks, recommended next steps, and a professional disclaimer.'}
+Do not invent facts; mark missing facts with clear placeholders.`;
+    const draft = await callAI([{ role: 'user', content: prompt }]);
+    booking.aiDraft = draft;
+    if (booking.status === 'confirmed' || booking.status === 'pending') booking.status = 'in_progress';
+    await booking.save();
+    res.json({ success: true, data: { draft: booking.aiDraft } });
+  } catch (err) { next(err); }
+};
+
+exports.saveAdvocateLegalNoticeDraft = async (req, res, next) => {
+  try {
+    const draft = String(req.body.draft || '').trim();
+    if (draft.length < 20 || draft.length > 20000) {
+      return next(new AppError('Draft must be between 20 and 20,000 characters.', 400));
+    }
+    const booking = await getAssignedLegalService(req.params.id, req.user._id);
+    booking.aiDraft = draft;
+    if (booking.status === 'confirmed' || booking.status === 'pending') booking.status = 'in_progress';
+    await booking.save();
+    res.json({ success: true, data: { draft: booking.aiDraft }, message: 'Draft saved.' });
+  } catch (err) { next(err); }
+};
+
+exports.submitAdvocateLegalNoticeDocument = async (req, res, next) => {
+  try {
+    const { name, url, type } = req.body;
+    if (!name || !url || !/^https:\/\//i.test(url)) {
+      return next(new AppError('A valid uploaded document is required.', 400));
+    }
+    let uploadedUrl;
+    try { uploadedUrl = new URL(url); } catch (_) {
+      return next(new AppError('The uploaded document URL is invalid.', 400));
+    }
+    const allowedUploadHosts = new Set([
+      'res.cloudinary.com',
+      ...(process.env.CLOUDINARY_DELIVERY_HOST ? [process.env.CLOUDINARY_DELIVERY_HOST] : []),
+    ]);
+    if (!allowedUploadHosts.has(uploadedUrl.hostname)) {
+      return next(new AppError('Document must be uploaded through the secure Legalitt upload service.', 400));
+    }
+    const booking = await getAssignedLegalService(req.params.id, req.user._id);
+    const document = {
+      name: String(name).slice(0, 255),
+      url: uploadedUrl.toString(),
+      type: type || 'document',
+      uploadedAt: new Date(),
+      uploadedBy: req.user._id,
+      reviewStatus: 'shared_with_client',
+    };
+    booking.advocateDocuments.push(document);
+    booking.status = 'completed';
+
+    let chat = booking.chat ? await Chat.findById(booking.chat) : null;
+    if (!chat) {
+      chat = await Chat.findOne({ booking: booking._id });
+    }
+    if (!chat) {
+      chat = await Chat.create({
+        participants: [booking.client._id || booking.client, req.user._id],
+        booking: booking._id,
+        isActive: true,
+      });
+      booking.chat = chat._id;
+    }
+
+    const message = await Message.create({
+      chat: chat._id,
+      sender: req.user._id,
+      content: booking.serviceType === 'legal_notice' ? 'Legal notice response document' : 'Legal advice document',
+      messageType: 'file',
+      fileUrl: document.url,
+      fileName: document.name,
+    });
+    chat.lastMessage = message._id;
+    chat.hiddenFor = [];
+    await chat.save();
+    await booking.save();
+
+    const populatedMessage = await message.populate('sender', 'name avatar role');
+    try {
+      const { getIO } = require('../config/socket');
+      const io = getIO();
+      io.to(`chat:${chat._id}`).emit('new_message', populatedMessage);
+      io.to(`user:${booking.client._id || booking.client}`).emit('conversation_updated', {
+        chatId: chat._id,
+        lastMessage: { content: `📎 ${document.name}`, sender: populatedMessage.sender?.name },
+      });
+      io.to(`user:${booking.client._id || booking.client}`).emit('booking_status_updated', {
+        bookingId: booking._id,
+        status: 'completed',
+        message: booking.serviceType === 'legal_notice' ? 'Your legal notice response is ready.' : 'Your legal advice document is ready.',
+      });
+      io.to('admin_room').emit('admin:document_uploaded', { bookingId: booking._id, document });
+    } catch (_) {}
+
+    createNotification({
+      recipientId: booking.client._id || booking.client,
+      senderId: req.user._id,
+      title: booking.serviceType === 'legal_notice' ? 'Legal Notice Response Ready' : 'Legal Advice Document Ready',
+      message: `${document.name} is available in your consultation chat.`,
+      type: 'document_shared',
+      relatedId: booking._id,
+    }).catch(() => {});
+
+    res.json({ success: true, data: { document, message: populatedMessage, chatId: chat._id }, message: 'Document shared with the client and visible to admin.' });
+  } catch (err) { next(err); }
 };

@@ -1,146 +1,80 @@
 // screens/client/PropertyResearchTrackScreen.jsx
-import React, { useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Linking,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SHADOWS } from '../../constants/theme';
+import { bookingAPI } from '../../services/api';
 
 const PRIMARY_BEIGE = '#C2A98B';
 
 export default function PropertyResearchTrackScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { paymentStatus, requestId } = route.params || {};
+  const { bookingId, requestId } = route.params || {};
+  const [booking, setBooking] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // PREMIUM LOCK GATE
   useEffect(() => {
-    if (paymentStatus !== 'SUCCESS') {
-      navigation.replace('PropertyResearchLock');
+    if (!bookingId) {
+      setError('A valid property research request is required.');
+      setLoading(false);
+      return;
     }
-  }, [paymentStatus]);
+    let mounted = true;
+    bookingAPI.getBooking(bookingId)
+      .then(({ data }) => mounted && data?.success && setBooking(data.data))
+      .catch(err => mounted && setError(err?.response?.data?.message || 'Unable to load this request.'))
+      .finally(() => mounted && setLoading(false));
+    return () => { mounted = false; };
+  }, [bookingId]);
 
-  if (paymentStatus !== 'SUCCESS') {
-    return null;
+  if (loading || error || !booking) {
+    return <View style={[styles.container, { alignItems: 'center', justifyContent: 'center', padding: 24 }]}>{loading ? <ActivityIndicator color={PRIMARY_BEIGE} /> : <Text>{error || 'Request not found.'}</Text>}</View>;
   }
 
-  const currentDate = new Date().toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  const displayId = requestId || `PR-${bookingId.slice(-6).toUpperCase()}`;
+  const documents = [...(booking.advocateDocuments || []), ...(booking.adminDocuments || [])];
+  const paid = booking.payment?.status === 'paid';
+  const assigned = !!booking.advocate;
+  const active = ['confirmed', 'in_progress'].includes(booking.status);
+  const completed = booking.status === 'completed';
+  const submittedAt = booking.createdAt ? new Date(booking.createdAt).toLocaleString('en-IN') : 'Not recorded';
+  const paidAt = booking.payment?.paidAt ? new Date(booking.payment.paidAt).toLocaleString('en-IN') : 'Pending';
 
-  const handleContactSupport = () => {
-    Linking.openURL('tel:18001234567');
+  const openReport = () => {
+    if (!documents.length) return Alert.alert('Report Pending', 'The property research report has not been uploaded yet.');
+    navigation.navigate('DocumentViewer', { documents, hasDocument: true, fileName: documents[0]?.name || 'Property Research Report', caseTitle: `Property Research ${displayId}` });
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-
-      {/* Navigation Header */}
       <View style={[styles.navHeader, { paddingTop: Math.max(insets.top, 16) }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="arrow-back" size={24} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Track Your Request</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={24} color="#1F2937" /></TouchableOpacity>
+        <Text style={styles.headerTitle}>Track Your Request</Text><View style={{ width: 40 }} />
       </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, 24) + 90 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Request Summary Header Card */}
+      <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) + 90 }]} showsVerticalScrollIndicator={false}>
         <View style={styles.summaryCard}>
           <View style={styles.cardTopRow}>
-            <View>
-              <Text style={styles.requestIdLabel}>Request ID</Text>
-              <Text style={styles.requestIdValue}>{requestId || '#PR-84920'}</Text>
-            </View>
-            <View style={styles.statusBadge}>
-              <View style={styles.pulseDot} />
-              <Text style={styles.statusBadgeText}>In Progress</Text>
-            </View>
+            <View><Text style={styles.requestIdLabel}>Request ID</Text><Text style={styles.requestIdValue}>{displayId}</Text></View>
+            <View style={styles.statusBadge}><View style={styles.pulseDot} /><Text style={styles.statusBadgeText}>{String(booking.status).replace(/_/g, ' ')}</Text></View>
           </View>
-
           <View style={styles.divider} />
-
-          <View style={styles.etaRow}>
-            <Ionicons name="calendar-outline" size={18} color={PRIMARY_BEIGE} />
-            <Text style={styles.etaText}>
-              Estimated Completion: <Text style={styles.etaBold}>3–5 Working Days</Text>
-            </Text>
-          </View>
+          <View style={styles.etaRow}><Ionicons name="location-outline" size={18} color={PRIMARY_BEIGE} /><Text style={styles.etaText}>{booking.propertyAddress || booking.clientCity || 'Location not provided'}</Text></View>
         </View>
-
-        {/* Vertical Progress Timeline */}
         <Text style={styles.timelineSectionTitle}>Live Verification Progress</Text>
-
         <View style={styles.timelineContainer}>
-          {/* Item 1 - Completed */}
-          <TimelineItem
-            status="completed"
-            title="Request Submitted"
-            timestamp={`${currentDate}, 10:30 AM`}
-            isFirst
-          />
-
-          {/* Item 2 - Completed */}
-          <TimelineItem
-            status="completed"
-            title="Payment Received"
-            timestamp={`${currentDate}, 10:31 AM`}
-          />
-
-          {/* Item 3 - Current Active */}
-          <TimelineItem
-            status="current"
-            title="Property Verification In Progress"
-            timestamp="Assigned to Senior Legal Advocate"
-          />
-
-          {/* Item 4 - Upcoming */}
-          <TimelineItem status="upcoming" title="Registry Verification" />
-
-          {/* Item 5 - Upcoming */}
-          <TimelineItem status="upcoming" title="Legal Review" />
-
-          {/* Item 6 - Upcoming */}
-          <TimelineItem status="upcoming" title="Report Preparation" />
-
-          {/* Item 7 - Upcoming */}
-          <TimelineItem status="upcoming" title="Report Quality Check" />
-
-          {/* Item 8 - Upcoming Final */}
-          <TimelineItem status="upcoming" title="Report Delivered" isLast />
+          <TimelineItem status="completed" title="Request Submitted" timestamp={submittedAt} isFirst />
+          <TimelineItem status={paid ? 'completed' : 'current'} title="Payment Received" timestamp={paidAt} />
+          <TimelineItem status={assigned ? 'completed' : paid ? 'current' : 'upcoming'} title="Advocate Assigned" timestamp={assigned ? 'Assigned' : 'Pending assignment'} />
+          <TimelineItem status={completed ? 'completed' : active ? 'current' : 'upcoming'} title="Property Verification" timestamp={completed ? 'Completed' : active ? 'In progress' : undefined} />
+          <TimelineItem status={documents.length ? 'completed' : completed ? 'current' : 'upcoming'} title="Report Delivered" timestamp={documents.length ? `${documents.length} document(s) available` : 'Pending'} isLast />
         </View>
+        {documents.length > 0 && <TouchableOpacity style={styles.supportButton} onPress={openReport}><Ionicons name="document-text" size={20} color="#FFFFFF" /><Text style={styles.supportButtonText}>View Report</Text></TouchableOpacity>}
       </ScrollView>
-
-      {/* Sticky Bottom Contact Support Button */}
       <View style={[styles.stickyFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <TouchableOpacity
-          style={styles.supportButton}
-          onPress={handleContactSupport}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="headset" size={20} color="#FFFFFF" />
-          <Text style={styles.supportButtonText}>Contact Support</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.supportButton} onPress={() => navigation.navigate('Support')}><Ionicons name="headset" size={20} color="#FFFFFF" /><Text style={styles.supportButtonText}>Contact Support</Text></TouchableOpacity>
       </View>
     </View>
   );

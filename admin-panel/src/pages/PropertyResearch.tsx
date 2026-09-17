@@ -39,7 +39,7 @@ const STATUS_CONFIG = {
   pending:     { label: 'Pending',     color: 'text-amber-700 bg-amber-50 border-amber-200',   icon: <Clock className="w-3 h-3" />,        dot: 'bg-amber-500' },
   in_progress: { label: 'In Progress', color: 'text-violet-700 bg-violet-50 border-violet-200',icon: <RotateCcw className="w-3 h-3" />,    dot: 'bg-violet-500' },
   closed:      { label: 'Closed',      color: 'text-gray-700 bg-gray-100 border-gray-200',     icon: <XCircle className="w-3 h-3" />,      dot: 'bg-gray-400' },
-  resolved:    { label: 'Resolved',    color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
+  resolved:    { label: 'Completed',   color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
 };
 
 const KANBAN_COLS: (keyof typeof STATUS_CONFIG)[] = ['open', 'pending', 'in_progress', 'resolved', 'closed'];

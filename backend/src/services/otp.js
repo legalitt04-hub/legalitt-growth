@@ -1,7 +1,6 @@
 const logger = require('../utils/logger');
-
-// In-memory OTP store (works for single-server; upgrade to Redis for multi-instance)
-const otpStore = new Map();
+const crypto = require('crypto');
+const EmailOTP = require('../models/EmailOTP');
 
 // 6-digit OTP for production security
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -39,19 +38,24 @@ const sendEmail = async ({ to, subject, text, html }) => {
 
   return Promise.race([
     sendTask(),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Email provider connection timed out')), 5000))
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Email provider connection timed out')), 12000))
   ]);
 };
 
 /**
  * Send OTP via Email.
  */
-exports.sendOTP = async (email) => {
+const hashOTP = (email, otp) => crypto
+  .createHmac('sha256', process.env.JWT_SECRET)
+  .update(`${email}:${otp}`)
+  .digest('hex');
+
+exports.sendOTP = async (email, requestedRole = 'client') => {
   const otp = generateOTP(); // 6-digit now
   const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
   const normalizedEmail = email.trim().toLowerCase();
-  otpStore.set(normalizedEmail, { otp, expiresAt, attempts: 0 });
+  const role = requestedRole === 'advocate' ? 'advocate' : 'client';
 
   const html = `
     <div style="font-family:'Segoe UI',Arial,sans-serif;padding:32px;background:#f4f6f8;">
@@ -79,11 +83,21 @@ exports.sendOTP = async (email) => {
       html,
     });
     logger.info(`OTP sent via ${result.provider} to ${normalizedEmail}`);
+    await EmailOTP.findOneAndUpdate(
+      { email: normalizedEmail },
+      { role, otpHash: hashOTP(normalizedEmail, otp), attempts: 0, expiresAt: new Date(expiresAt) },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
     return { success: true, emailSent: true };
   } catch (err) {
     logger.error(`Failed to send OTP to ${normalizedEmail}: ${err.message}`);
     // In development only, expose OTP so testing is not blocked
     if (process.env.NODE_ENV !== 'production') {
+      await EmailOTP.findOneAndUpdate(
+        { email: normalizedEmail },
+        { role, otpHash: hashOTP(normalizedEmail, otp), attempts: 0, expiresAt: new Date(expiresAt) },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
       logger.info(`[DEV FALLBACK] OTP for ${normalizedEmail}: ${otp}`);
       return { success: true, fallback: true, dev: true, otp };
     }
@@ -94,33 +108,41 @@ exports.sendOTP = async (email) => {
 /**
  * Verify OTP entered by user.
  */
-exports.verifyOTP = (email, enteredOTP) => {
+exports.verifyOTP = async (email, enteredOTP, requestedRole = 'client') => {
   const key = email.trim().toLowerCase();
+  const role = requestedRole === 'advocate' ? 'advocate' : 'client';
 
   // Only allow master bypass in dev via DEV_MASTER_OTP env variable (not '1234' hardcoded)
   if (process.env.NODE_ENV !== 'production' && process.env.DEV_MASTER_OTP && String(enteredOTP) === process.env.DEV_MASTER_OTP) {
     logger.info(`[DEV MASTER OTP] Accepted for ${key}`);
-    return { success: true };
+    return { success: true, role };
   }
 
-  const stored = otpStore.get(key);
+  const stored = await EmailOTP.findOne({ email: key }).select('+otpHash');
   if (!stored) return { success: false, message: 'OTP expired or not found. Please request a new one.' };
 
-  if (Date.now() > stored.expiresAt) {
-    otpStore.delete(key);
+  if (Date.now() > stored.expiresAt.getTime()) {
+    await EmailOTP.deleteOne({ _id: stored._id });
     return { success: false, message: 'OTP has expired. Please request a new one.' };
+  }
+
+  if (stored.role !== role) {
+    return { success: false, message: 'OTP role does not match this registration.' };
   }
 
   stored.attempts += 1;
   if (stored.attempts > 5) {
-    otpStore.delete(key);
+    await EmailOTP.deleteOne({ _id: stored._id });
     return { success: false, message: 'Too many failed attempts. Please request a new OTP.' };
   }
 
-  if (stored.otp !== String(enteredOTP)) {
+  const expected = Buffer.from(stored.otpHash, 'hex');
+  const received = Buffer.from(hashOTP(key, String(enteredOTP)), 'hex');
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    await stored.save();
     return { success: false, message: `Incorrect OTP. ${5 - stored.attempts} attempts remaining.` };
   }
 
-  otpStore.delete(key);
-  return { success: true };
+  await EmailOTP.deleteOne({ _id: stored._id });
+  return { success: true, role };
 };

@@ -44,6 +44,7 @@ export default function DocumentUploadScreen({ navigation, route }) {
       setUploadingId(true);
       try {
         const uploadRes = await uploadAPI.uploadFile(file.uri, file.name, file.mimeType);
+        if (!uploadRes?.data?.data?.url) throw new Error('Upload did not return a secure URL.');
         setIdDoc({
           uri: file.uri,
           name: file.name,
@@ -51,12 +52,7 @@ export default function DocumentUploadScreen({ navigation, route }) {
           cloudUrl: uploadRes?.data?.data?.url,
         });
       } catch (uploadErr) {
-        // Allow offline / fallback — store local
-        setIdDoc({
-          uri: file.uri,
-          name: file.name,
-          size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
-        });
+        Alert.alert('Upload Failed', uploadErr.response?.data?.message || uploadErr.message || 'Please try again.');
       } finally {
         setUploadingId(false);
       }
@@ -84,6 +80,7 @@ export default function DocumentUploadScreen({ navigation, route }) {
       setUploadingCert(true);
       try {
         const uploadRes = await uploadAPI.uploadFile(file.uri, file.name, file.mimeType);
+        if (!uploadRes?.data?.data?.url) throw new Error('Upload did not return a secure URL.');
         setCertDoc({
           uri: file.uri,
           name: file.name,
@@ -91,11 +88,7 @@ export default function DocumentUploadScreen({ navigation, route }) {
           cloudUrl: uploadRes?.data?.data?.url,
         });
       } catch (uploadErr) {
-        setCertDoc({
-          uri: file.uri,
-          name: file.name,
-          size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
-        });
+        Alert.alert('Upload Failed', uploadErr.response?.data?.message || uploadErr.message || 'Please try again.');
       } finally {
         setUploadingCert(false);
       }
@@ -115,16 +108,12 @@ export default function DocumentUploadScreen({ navigation, route }) {
     try {
       await advocateAPI.upsertProfile({
         barCouncilId: registerData?.barCouncilId || 'PENDING',
-        documents: {
-          idCard: idDoc.cloudUrl || idDoc.uri,
-          certificate: certDoc.cloudUrl || certDoc.uri,
-        },
+        documents: { idCard: idDoc.cloudUrl, certificate: certDoc.cloudUrl },
       });
       navigation.replace('PendingApproval');
     } catch (profileErr) {
       console.log('Failed to upsert advocate profile:', profileErr.message);
-      // Even if profile update fails, still go to pending (user is registered)
-      navigation.replace('PendingApproval');
+      Alert.alert('Submission Failed', profileErr.response?.data?.message || 'Your documents were not submitted. Please try again.');
     } finally {
       setLoading(false);
     }

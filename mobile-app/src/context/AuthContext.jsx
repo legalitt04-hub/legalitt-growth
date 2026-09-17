@@ -9,6 +9,11 @@ import { authAPI, TOKEN_KEY, REFRESH_KEY } from '../services/api';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const AuthContext = createContext(null);
+const CACHED_USER_KEY = 'legalitt_cached_user';
+
+const cacheUser = async (user) => {
+  if (user) await AsyncStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+};
 
 const initialState = {
   user: null,
@@ -83,13 +88,26 @@ export const AuthProvider = ({ children }) => {
         if (!token) return dispatch({ type: 'LOADED' });
 
         const { data } = await authAPI.getMe();
+        await cacheUser(data.data);
         dispatch({ type: 'LOGIN_SUCCESS', payload: data.data });
         // Connect socket immediately using the saved token
         connectSocket(token);
       } catch (err) {
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
-        await SecureStore.deleteItemAsync(REFRESH_KEY);
-        dispatch({ type: 'LOADED' });
+        const status = err.response?.status;
+        if (status === 401 || status === 403) {
+          await SecureStore.deleteItemAsync(TOKEN_KEY);
+          await SecureStore.deleteItemAsync(REFRESH_KEY);
+          await AsyncStorage.removeItem(CACHED_USER_KEY);
+          dispatch({ type: 'LOADED' });
+        } else {
+          const cached = await AsyncStorage.getItem(CACHED_USER_KEY);
+          if (cached) {
+            dispatch({ type: 'LOGIN_SUCCESS', payload: JSON.parse(cached) });
+            connectSocket(token);
+          } else {
+            dispatch({ type: 'LOADED' });
+          }
+        }
       }
     };
     restoreSession();
@@ -101,6 +119,7 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.login({ email, password });
       await SecureStore.setItemAsync(TOKEN_KEY, data.data.accessToken);
       await SecureStore.setItemAsync(REFRESH_KEY, data.data.refreshToken);
+      await cacheUser(data.data.user);
       dispatch({ type: 'LOGIN_SUCCESS', payload: data.data.user });
       // Connect socket immediately with the fresh token — no delay needed
       connectSocket(data.data.accessToken);
@@ -118,6 +137,7 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.register(userData);
       await SecureStore.setItemAsync(TOKEN_KEY, data.data.accessToken);
       await SecureStore.setItemAsync(REFRESH_KEY, data.data.refreshToken);
+      await cacheUser(data.data.user);
       dispatch({ type: 'LOGIN_SUCCESS', payload: data.data.user });
       return { success: true, user: data.data.user };
     } catch (err) {
@@ -132,11 +152,16 @@ export const AuthProvider = ({ children }) => {
     dispatch({ type: 'LOADING' });
     try {
       const { data } = await authAPI.googleAuth(idToken, role, accessToken);
+      const authenticatedUser = {
+        ...data.data.user,
+        requiresAdvocateOnboarding: !!data.data.requiresAdvocateOnboarding,
+      };
       await SecureStore.setItemAsync(TOKEN_KEY, data.data.accessToken);
       await SecureStore.setItemAsync(REFRESH_KEY, data.data.refreshToken);
+      await cacheUser(authenticatedUser);
       connectSocket(data.data.accessToken);
-      dispatch({ type: 'LOGIN_SUCCESS', payload: data.data.user });
-      return { success: true, user: data.data.user };
+      dispatch({ type: 'LOGIN_SUCCESS', payload: authenticatedUser });
+      return { success: true, user: authenticatedUser, requiresAdvocateOnboarding: authenticatedUser.requiresAdvocateOnboarding };
     } catch (err) {
       const msg = err.response?.data?.message || 'Google login failed';
       dispatch({ type: 'ERROR', payload: msg });
@@ -153,6 +178,7 @@ export const AuthProvider = ({ children }) => {
 
     try { await SecureStore.deleteItemAsync(TOKEN_KEY); } catch { /* ignore */ }
     try { await SecureStore.deleteItemAsync(REFRESH_KEY); } catch { /* ignore */ }
+    try { await AsyncStorage.removeItem(CACHED_USER_KEY); } catch { /* ignore */ }
     try { disconnectSocket(); } catch { /* ignore */ }
 
     // This MUST always run — makes isAuthenticated false → AppNavigator → Onboarding
@@ -163,6 +189,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await authAPI.getMe(); // Now calls unified endpoint
       dispatch({ type: 'UPDATE_USER', payload: data.data });
+      await cacheUser(data.data);
       return data.data;
     } catch (err) {
       console.log('Refresh user error:', err);
@@ -171,7 +198,8 @@ export const AuthProvider = ({ children }) => {
 
   const updateUser = useCallback((data) => {
     dispatch({ type: 'UPDATE_USER', payload: data });
-  }, []);
+    cacheUser({ ...state.user, ...data }).catch(() => {});
+  }, [state.user]);
 
   const acceptConsent = useCallback(async () => {
     try {

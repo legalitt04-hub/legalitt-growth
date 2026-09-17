@@ -9,31 +9,25 @@ import { StatusTimeline } from '../../components/legalAdvice/StatusTimeline';
 import { PrimaryButton } from '../../components/legalAdvice/PrimaryButton';
 import { SecondaryButton } from '../../components/legalAdvice/SecondaryButton';
 import { bookingAPI, legalAdviceAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 export default function TrackConsultationScreen({ navigation, route }) {
-  const initialData = route?.params?.bookingData || {
-    requestId: 'LEG-2026-8492',
-    selectedType: { title: 'Audio Consultation' },
-    selectedMatter: { title: 'Property Law' },
-    scheduledTime: 'Tomorrow, 10:30 AM',
-    status: 'scheduled',
-    lawyer: {
-      name: 'Adv. Rajesh Kumar',
-      title: 'Senior Supreme Court Advocate',
-      experience: '15+ Years Exp.',
-      rating: '4.9',
-      reviewsCount: '340+',
-      avatarUri: 'https://i.pravatar.cc/150?img=11',
-    },
-  };
+  const initialData = route?.params?.bookingData || null;
+  const { user } = useAuth();
 
   const [bookingData, setBookingData] = useState(initialData);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const fetchLiveConsultation = async () => {
     const id = route?.params?.bookingId || route?.params?.id || route?.params?.requestId || route?.params?.bookingData?._id || route?.params?.bookingData?.id;
-    if (!id || id.startsWith('LEG-2026')) return;
+    if (!id) {
+      setLoadError('A valid consultation ID is required.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setLoadError('');
     try {
       let res;
       try {
@@ -41,28 +35,27 @@ export default function TrackConsultationScreen({ navigation, route }) {
       } catch {
         res = await legalAdviceAPI.getRequestDetail(id);
       }
-      if (res.data?.success && res.data?.data) {
-        const live = res.data.data;
-        setBookingData({
-          _id: live._id,
-          requestId: live.requestId || live._id?.slice(-8)?.toUpperCase() || 'LEG-2026',
-          selectedType: { title: live.consultationType || live.type || 'Audio Consultation' },
-          selectedMatter: { title: live.legalMatter || live.category || 'Legal Advice' },
-          scheduledTime: live.scheduledAt ? new Date(live.scheduledAt).toLocaleString() : 'Scheduled Slot',
-          status: live.status || 'scheduled',
-          lawyer: {
-            id: live.advocate?._id || live.advocate?.user?._id,
-            name: live.advocate?.user?.name || live.advocate?.name || 'Assigned Advocate',
-            title: live.advocate?.title || 'High Court Advocate',
-            experience: live.advocate?.experience ? `${live.advocate.experience}+ Years Exp.` : '10+ Years Exp.',
-            rating: live.advocate?.rating?.average ? live.advocate.rating.average.toFixed(1) : '4.8',
-            reviewsCount: live.advocate?.rating?.count ? `${live.advocate.rating.count}+` : '100+',
-            avatarUri: live.advocate?.user?.avatar || live.advocate?.avatar || 'https://i.pravatar.cc/150?img=11',
-          },
-        });
-      }
+      if (!res.data?.success || !res.data?.data) throw new Error('Consultation was not found.');
+      const live = res.data.data;
+      setBookingData({
+        ...live,
+        requestId: live.requestId || live._id?.slice(-8)?.toUpperCase(),
+        selectedType: { title: live.consultationMode || live.type || 'Consultation' },
+        selectedMatter: { title: live.issueCategory || live.serviceType || 'Legal Advice' },
+        scheduledTime: live.date ? new Date(live.date).toLocaleString('en-IN') : 'Time not scheduled',
+        lawyer: live.advocate ? {
+          id: live.advocate._id,
+          userId: live.advocate.user?._id,
+          name: live.advocate.user?.name || 'Assigned Advocate',
+          title: live.advocate.title || 'Verified Advocate',
+          experience: live.advocate.experience ? `${live.advocate.experience} Years Exp.` : '',
+          rating: live.advocate.rating?.average || 0,
+          reviewsCount: live.advocate.rating?.count || 0,
+          avatarUri: live.advocate.user?.avatar || null,
+        } : null,
+      });
     } catch (err) {
-      console.log('Error fetching live consultation:', err);
+      setLoadError(err?.response?.data?.message || err.message || 'Unable to load consultation.');
     } finally {
       setLoading(false);
     }
@@ -72,27 +65,65 @@ export default function TrackConsultationScreen({ navigation, route }) {
     fetchLiveConsultation();
   }, []);
 
-  const handleJoin = () => {
-    Alert.alert(
-      'Join Consultation',
-      'Connecting to secure encrypted audio/video channel with Adv. Rajesh Kumar...',
-      [
-        {
-          text: 'Complete Demo Consultation',
-          onPress: () => navigation.navigate('ConsultationCompleted', { bookingData }),
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
+  const handleJoin = async () => {
+    const id = bookingData?._id || bookingData?.id;
+    if (!id || !bookingData?.lawyer) {
+      Alert.alert('Call Not Ready', 'An advocate must be assigned before the consultation can start.');
+      return;
+    }
+    try {
+      const { data } = await bookingAPI.canJoinCall(id);
+      if (!data?.success || !data.canJoin) {
+        Alert.alert('Call Not Available', data?.message || 'The consultation call window is not open.');
+        return;
+      }
+      const call = data.data || {};
+      navigation.navigate('VideoCall', {
+        bookingId: id,
+        zegoRoomId: call.zegoRoomId,
+        zegoToken: call.zegoToken,
+        zegoAppId: call.zegoAppId,
+        mode: bookingData.consultationMode || bookingData.type || 'video',
+        advocateName: bookingData.lawyer.name,
+        advocateAvatar: bookingData.lawyer.avatarUri,
+        advocateUserId: bookingData.lawyer.userId,
+        clientId: user?._id || user?.id,
+        myUserId: user?._id || user?.id,
+        myUserName: user?.name || 'Client',
+      });
+    } catch (error) {
+      Alert.alert('Call Not Available', error?.response?.data?.message || 'Secure call credentials could not be loaded.');
+    }
+  };
+
+  const handleReschedule = () => navigation.navigate('MyBookings');
+  const handleSupport = () => navigation.navigate('Support');
+  const handleContact = () => {
+    if (!bookingData?.chat) {
+      Alert.alert('Chat Not Ready', 'Chat will be available after advocate assignment and payment confirmation.');
+      return;
+    }
+    navigation.navigate('Chat', {
+      chatId: bookingData.chat,
+      bookingId: bookingData._id,
+      advocateName: bookingData.lawyer?.name,
+      advocateAvatar: bookingData.lawyer?.avatarUri,
+      advocateId: bookingData.lawyer?.id,
+    });
+  };
+
+  if (loading || loadError || !bookingData) {
+    return (
+      <SafeScreen backgroundColor="#07080A" barStyle="light-content">
+        <LogoHeader title="Track Consultation" onBack={() => navigation.goBack()} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          {loading ? <ActivityIndicator color="#D4AF37" /> : <Text style={{ color: '#FFFFFF', textAlign: 'center' }}>{loadError || 'Consultation details are unavailable.'}</Text>}
+        </View>
+      </SafeScreen>
     );
-  };
+  }
 
-  const handleReschedule = () => {
-    Alert.alert('Reschedule Request', 'Your advocate will be notified for slot rescheduling.');
-  };
-
-  const handleSupport = () => {
-    Alert.alert('Client Support', 'Connected to 24/7 client helpline.');
-  };
+  const statusLabel = String(bookingData.status || 'pending').replace(/_/g, ' ');
 
   return (
     <SafeScreen backgroundColor="#07080A" barStyle="light-content">
@@ -113,7 +144,7 @@ export default function TrackConsultationScreen({ navigation, route }) {
 
               <View style={styles.statusBadge}>
                 <View style={styles.greenDot} />
-                <Text style={styles.statusBadgeText}>Scheduled</Text>
+                <Text style={styles.statusBadgeText}>{statusLabel}</Text>
               </View>
             </View>
 
@@ -126,7 +157,7 @@ export default function TrackConsultationScreen({ navigation, route }) {
 
             <View style={styles.meetingDetailRow}>
               <Ionicons name="hardware-chip-outline" size={18} color="#D4AF37" />
-              <Text style={styles.meetingTypeText}>{bookingData.selectedType?.title || 'Audio Consultation'} • High Priority</Text>
+              <Text style={styles.meetingTypeText}>{String(bookingData.selectedType?.title || 'Consultation').replace(/_/g, ' ')}</Text>
             </View>
           </View>
 
@@ -139,7 +170,7 @@ export default function TrackConsultationScreen({ navigation, route }) {
             rating={bookingData.lawyer?.rating}
             reviewsCount={bookingData.lawyer?.reviewsCount}
             avatarUri={bookingData.lawyer?.avatarUri}
-            onContact={() => Alert.alert('Chat Initiated', 'Opening encrypted chat window with advocate...')}
+            onContact={handleContact}
           />
 
           {/* TIMELINE */}

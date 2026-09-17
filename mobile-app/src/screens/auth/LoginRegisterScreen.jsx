@@ -151,18 +151,13 @@ const LoginRegisterScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleSocialLogin = async (provider) => {
+  const handleSocialLogin = async () => {
     if (!agreeToTerms) {
       setTermsError(true);
       Alert.alert(
         'Consent Required',
         'Please read and agree to the Terms & Conditions and Privacy Policy to continue.'
       );
-      return;
-    }
-
-    if (provider !== 'Google') {
-      Alert.alert('Social Login', `${provider} login will be implemented soon`);
       return;
     }
 
@@ -193,6 +188,8 @@ const LoginRegisterScreen = ({ navigation, route }) => {
           response.message || 'Could not verify your Google account. Please try again.',
           [{ text: 'OK' }]
         );
+      } else if (response.requiresAdvocateOnboarding) {
+        setTimeout(() => navigation.navigate('DocumentUpload', { registerData: { name: userData?.name } }), 0);
       }
       // On success, AuthContext auto-navigates via isAuthenticated state
     } catch (error) {
@@ -406,7 +403,7 @@ const LoginRegisterScreen = ({ navigation, route }) => {
           {/* Google Sign-In — Full Width Button */}
           <TouchableOpacity
             style={styles.googleButton}
-            onPress={() => handleSocialLogin('Google')}
+            onPress={handleSocialLogin}
             disabled={loading}
             accessibilityLabel="Continue with Google"
           >

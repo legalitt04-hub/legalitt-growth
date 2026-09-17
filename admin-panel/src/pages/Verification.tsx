@@ -19,7 +19,6 @@ const Verification = () => {
   const [totalItems, setTotalItems] = useState(0);
   const limit = 20;
 
-  // Stats (simulated for now since API doesn't return count aggregations by default)
   const [stats, setStats] = useState({ pending: 0, under_review: 0, approved: 0 });
 
   useEffect(() => {
@@ -47,16 +46,19 @@ const Verification = () => {
       if (statusFilter) queryParams.append('verificationStatus', statusFilter);
       if (debouncedSearch) queryParams.append('search', debouncedSearch);
 
-      const res = await api.get(`/admin/advocates?${queryParams.toString()}`);
+      const res = await api.get(`/admin/pending-advocates?${queryParams.toString()}`);
       setVerifications(res.data.data);
       if (res.data.pagination) {
         setTotalPages(res.data.pagination.pages);
         setTotalItems(res.data.pagination.total);
       }
       
-      // Fetch stats only once or when needed (this is a bit hacky without a dedicated stats endpoint)
-      if (stats.pending === 0 && statusFilter === 'pending' && !debouncedSearch) {
-         setStats(prev => ({ ...prev, pending: res.data.pagination?.total || 0 }));
+      if (res.data.counts) {
+        setStats({
+          pending: res.data.counts.pending || 0,
+          under_review: res.data.counts.under_review || 0,
+          approved: res.data.counts.approved || 0,
+        });
       }
     } catch (err) {
       console.error('Failed to load verifications', err);
@@ -68,7 +70,9 @@ const Verification = () => {
   const handleVerify = useCallback(async (id: string, status: 'approved' | 'rejected') => {
     setActionLoading(id + status);
     try {
-      await api.patch(`/admin/advocates/${id}/verify`, { status, note: `Admin ${status}` });
+      await api.patch(`/admin/pending-advocates/${id}/${status === 'approved' ? 'approve' : 'reject'}`, {
+        reason: status === 'rejected' ? 'Rejected during verification review' : undefined,
+      });
       setVerifications(prev => prev.filter(v => v._id !== id));
       setStats(prev => ({
         ...prev,

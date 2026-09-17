@@ -89,8 +89,8 @@ export default function PaymentHistory() {
   const statCards = [
     { label: 'Total Collected', value: fmt(summary.totalCollected || 0), sub: `${summary.totalBookings || 0} paid bookings`, icon: IndianRupee, color: 'from-teal-500 to-emerald-500', bg: 'bg-teal-50', tc: 'text-teal-600' },
     { label: 'Average Payment', value: fmt(summary.avgAmount || 0), sub: 'Per booking', icon: TrendingUp, color: 'from-blue-500 to-indigo-500', bg: 'bg-blue-50', tc: 'text-blue-600' },
-    { label: 'Paid', value: payments.filter(p => p.payment?.status === 'paid').length, sub: 'Successful transactions', icon: CheckCircle2, color: 'from-emerald-500 to-green-500', bg: 'bg-emerald-50', tc: 'text-emerald-600' },
-    { label: 'Pending', value: payments.filter(p => p.payment?.status === 'pending').length, sub: 'Awaiting payment', icon: Clock, color: 'from-amber-500 to-orange-500', bg: 'bg-amber-50', tc: 'text-amber-600' },
+    { label: 'Paid', value: summary.paidCount || 0, sub: 'Successful transactions', icon: CheckCircle2, color: 'from-emerald-500 to-green-500', bg: 'bg-emerald-50', tc: 'text-emerald-600' },
+    { label: 'Pending', value: summary.pendingCount || 0, sub: 'Awaiting payment', icon: Clock, color: 'from-amber-500 to-orange-500', bg: 'bg-amber-50', tc: 'text-amber-600' },
   ];
 
   return (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, Switch, RefreshControl, Image, Alert, ActivityIndicator
+  StatusBar, Switch, RefreshControl, Image, Alert, ActivityIndicator, Share
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useChatList } from '../../hooks/useChat';
 import { COLORS } from '../../constants/theme';
 import { formatINR } from '../../utils/helpers';
-import { getSocket } from '../../services/socket';
+import { getSocket, initiateCall } from '../../services/socket';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
@@ -209,7 +209,6 @@ const AdvocateDashboardScreen = ({ navigation }) => {
     const socket = getSocket();
     if (!socket) return;
 
-    const { ZEGO_APP_ID, ZEGO_APP_SIGN } = Constants.expoConfig?.extra || {};
     const advocateUser = user?.user || user || {};
 
     const handleNewBooking = (data) => {
@@ -232,32 +231,32 @@ const AdvocateDashboardScreen = ({ navigation }) => {
                   advocateId: data.client?._id,
                 });
               } else if (data.consultationMode === 'voice' || data.consultationMode === 'video') {
-                const effectiveRoomId = data.zegoRoomId || data.videoRoomId || null;
-                const { connectSocket } = require('../../services/socket');
-                const socket = getSocket() || await connectSocket();
-                if (socket && data.bookingId) {
-                  socket.emit('initiate_call', {
+                if (!data.bookingId) {
+                  Alert.alert('Call unavailable', 'The booking reference is missing.');
+                  return;
+                }
+                try {
+                  const { data: joinResponse } = await api.get(`/bookings/${data.bookingId}/can-join-call`);
+                  if (joinResponse?.canJoin === false) throw new Error(joinResponse.message || 'The call window is closed.');
+                  const callConfig = joinResponse?.data || {};
+                  await initiateCall({
                     bookingId: data.bookingId,
-                    zegoRoomId: effectiveRoomId,
+                    zegoRoomId: callConfig.zegoRoomId,
                     mode: data.consultationMode,
                   });
-                } else {
-                  Alert.alert('Error', 'Could not connect to call server.');
+                  navigation.navigate('AdvocateCall', {
+                    ...callConfig,
+                    clientName: data.client?.name || 'Client',
+                    clientAvatar: data.client?.avatar,
+                    mode: data.consultationMode,
+                    bookingId: data.bookingId,
+                    clientId: data.client?._id,
+                    myUserId: callConfig.myUserId || advocateUser._id || advocateUser.id || '',
+                    myUserName: callConfig.myUserName || advocateUser.name || 'Advocate',
+                  });
+                } catch (err) {
+                  Alert.alert('Call unavailable', err.response?.data?.message || err.message || 'Could not connect to the call server.');
                 }
-                
-                navigation.navigate('AdvocateCall', {
-                  clientName:   data.client?.name || 'Client',
-                  clientAvatar: data.client?.avatar,
-                  mode:         data.consultationMode,
-                  bookingId:    data.bookingId,
-                  clientId:     data.client?._id,
-                  // Zego credentials from admin assignment notification
-                  zegoRoomId:   effectiveRoomId,
-                  zegoToken:    data.advocateToken || data.advocateVideoToken || null,
-                  zegoAppId:    data.zegoAppId     || 0,
-                  myUserId:     advocateUser._id   || advocateUser.id || '',
-                  myUserName:   advocateUser.name  || 'Advocate',
-                });
               }
             },
           },
@@ -549,7 +548,7 @@ const AdvocateDashboardScreen = ({ navigation }) => {
 
           <TouchableOpacity 
             style={[styles.highlightedCardFull, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}
-            onPress={() => navigation.navigate('AdvocateCalendar')}
+            onPress={() => navigation.navigate('AdvocateAppointmentCalendar')}
           >
             <View style={styles.fullCardContent}>
               <View style={[styles.highlightedIconWrap, { backgroundColor: '#FEF3C7' }]}>
@@ -586,7 +585,16 @@ const AdvocateDashboardScreen = ({ navigation }) => {
               icon="share-social-outline" 
               title="Share Profile" 
               color="#10B981"
-              onPress={() => Alert.alert('Share Link', 'Copied your professional profile card link!')} 
+              onPress={async () => {
+                try {
+                  await Share.share({
+                    title: `${user?.name || 'Advocate'} on Legalitt`,
+                    message: `Connect with ${user?.name || 'this advocate'} on Legalitt for legal consultation.`,
+                  });
+                } catch {
+                  Alert.alert('Unable to share', 'Please try again.');
+                }
+              }}
             />
             <ListTile 
               icon="settings-outline" 

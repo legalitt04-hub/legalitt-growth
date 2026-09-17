@@ -18,7 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
-import { legalAdviceAPI, firAPI } from '../../services/api';
+import { legalAdviceAPI } from '../../services/api';
 import Toast from 'react-native-toast-message';
 
 const { width } = Dimensions.get('window');
@@ -94,22 +94,18 @@ export default function FIRDraftScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // Try legalAdviceAPI request for FIR draft assistance
-      if (legalAdviceAPI?.createRequest) {
-        await legalAdviceAPI.createRequest({
-          serviceType: 'fir_draft_assistance',
-          consultationMode: 'audio',
-          fullName: fullName.trim(),
-          phone: cleanPhone,
-          preferredTime: preferredTime || 'Anytime',
-          notes: 'Request for FIR Draft Assistance',
-        });
-      }
+      await legalAdviceAPI.createRequest({
+        serviceType: 'fir_draft',
+        consultationMode: 'voice',
+        issueCategory: 'criminal',
+        issueDescription: `FIR draft assistance requested by ${fullName.trim()} (${cleanPhone}). Preferred contact time: ${preferredTime || 'Anytime'}.`,
+        preferredSlot: preferredTime || 'Anytime',
+      });
       setShowSuccessModal(true);
     } catch (err) {
-      console.log('FIR draft request submission note:', err?.message);
-      // Even if offline or mock backend, present success confirmation to the user
-      setShowSuccessModal(true);
+      const message = err?.response?.data?.message || err?.message || 'Could not submit your request. Please try again.';
+      console.log('FIR draft request submission failed:', message);
+      Alert.alert('Request Not Submitted', message);
     } finally {
       setLoading(false);
     }
@@ -464,11 +460,11 @@ export default function FIRDraftScreen({ navigation }) {
               style={styles.successModalBtn}
               onPress={() => {
                 setShowSuccessModal(false);
-                navigation.goBack();
+                navigation.navigate('MyDrafts');
               }}
               activeOpacity={0.85}
             >
-              <Text style={styles.successModalBtnText}>Back to Home</Text>
+              <Text style={styles.successModalBtnText}>View My FIR Drafts</Text>
             </TouchableOpacity>
           </View>
         </View>

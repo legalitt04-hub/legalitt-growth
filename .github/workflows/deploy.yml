@@ -91,7 +91,7 @@ jobs:
           echo "Waiting 60 seconds for deploy to complete..."
           sleep 60
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            https://legalitt-api.onrender.com/health)
+            https://legalitt-growth.onrender.com/health)
           if [ "$STATUS" = "200" ]; then
             echo "✅ Deployment successful — API is healthy"
           else

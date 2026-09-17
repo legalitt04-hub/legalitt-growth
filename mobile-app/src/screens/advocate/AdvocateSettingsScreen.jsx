@@ -59,6 +59,9 @@ export default function AdvocateSettingsScreen({ navigation }) {
               availableForConsultations: res.data.data.isOnline,
             }));
           }
+          if (res.data.data.appPreferences) {
+            setPreferences(prev => ({ ...prev, ...res.data.data.appPreferences }));
+          }
         }
       } catch (profileErr) {
         // Fallback gracefully if advocate profile endpoint fails
@@ -110,21 +113,26 @@ export default function AdvocateSettingsScreen({ navigation }) {
 
   // Update a single preference toggle
   const handleToggle = async (key, val) => {
+    const previous = preferences;
     const updated = { ...preferences, [key]: val };
     setPreferences(updated);
     try {
+      const appPreferences = {
+        bookingRequest: updated.bookingRequest,
+        appointmentReminders: updated.appointmentReminders,
+        clientMessages: updated.clientMessages,
+        paymentNotifications: updated.paymentNotifications,
+        videoConsultation: updated.videoConsultation,
+        voiceConsultation: updated.voiceConsultation,
+      };
+      await advocateAPI.upsertProfile({
+        appPreferences,
+        ...(key === 'availableForConsultations' ? { isOnline: val } : {}),
+      });
       await AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated));
     } catch (e) {
-      // Ignore storage error
-    }
-
-    // If toggling consultation availability, sync with advocate online status if supported
-    if (key === 'availableForConsultations') {
-      try {
-        await advocateAPI.upsertProfile({ isOnline: val });
-      } catch (err) {
-        // Keep local state intact
-      }
+      setPreferences(previous);
+      Alert.alert('Update Failed', e?.response?.data?.message || 'Could not save this preference.');
     }
   };
 
@@ -511,11 +519,7 @@ export default function AdvocateSettingsScreen({ navigation }) {
                 title: 'App Permissions',
                 subtitle: 'Manage app permissions',
                 onPress: () => {
-                  Alert.alert(
-                    'App Permissions',
-                    'Camera: Used for Video Consultation & Document Scan\nMicrophone: Used for Voice/Video Calls\nNotifications: Used for Real-time Bookings & Chats\nStorage: Used for Document & Evidence Vaults',
-                    [{ text: 'OK' }]
-                  );
+                  Linking.openSettings().catch(() => Alert.alert('App Permissions', 'Open your device settings and select Legalitt.'));
                 },
               })}
               {renderRow({
@@ -523,11 +527,10 @@ export default function AdvocateSettingsScreen({ navigation }) {
                 title: 'Active Sessions',
                 subtitle: 'View and manage active sessions',
                 onPress: () => {
-                  Alert.alert(
-                    'Active Sessions',
-                    `Current Device: ${Platform.OS.toUpperCase()} Client\nSession Status: Secure & Authenticated\nLast Active: Just Now`,
-                    [{ text: 'OK' }]
-                  );
+                  api.get('/auth/sessions').then(({ data }) => {
+                    const session = data?.data || {};
+                    Alert.alert('Active Sessions', `Signed-in sessions: ${session.activeSessions || 1}\nCurrent device: ${Platform.OS.toUpperCase()}\nLast account activity: ${session.lastSeen ? new Date(session.lastSeen).toLocaleString() : 'Available'}`);
+                  }).catch(err => Alert.alert('Unable to Load Sessions', err?.response?.data?.message || 'Please try again.'));
                 },
               })}
               {renderRow({
@@ -540,23 +543,7 @@ export default function AdvocateSettingsScreen({ navigation }) {
             </View>
           </View>
 
-          {/* ────────────────── 6. PREFERENCES ────────────────── */}
-          <View style={styles.sectionWrap}>
-            <Text style={styles.sectionHeaderTitle}>Preferences</Text>
-            <View style={styles.cardContainer}>
-              {renderRow({
-                icon: 'language-outline',
-                title: 'Language',
-                subtitle: 'English',
-                onPress: () => {
-                  Alert.alert('Language Settings', 'Currently set to English (Default). Hindi and regional languages will be available in the upcoming release.', [{ text: 'OK' }]);
-                },
-                isLast: true,
-              })}
-            </View>
-          </View>
-
-          {/* ────────────────── 7. PAYMENT & PAYOUT SETTINGS ────────────────── */}
+          {/* ────────────────── 6. PAYMENT & PAYOUT SETTINGS ────────────────── */}
           <View style={styles.sectionWrap}>
             <Text style={styles.sectionHeaderTitle}>Payment & Payout settings</Text>
             <View style={styles.cardContainer}>

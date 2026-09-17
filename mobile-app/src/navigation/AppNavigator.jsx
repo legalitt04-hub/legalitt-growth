@@ -1,6 +1,5 @@
 import { Platform, View, ActivityIndicator, Text, StatusBar, TouchableOpacity, StyleSheet as RNStyleSheet, Dimensions } from 'react-native';
 
-import AuthLoadingScreen from './AuthLoadingScreen';
 import React, { useRef, useState, useEffect } from 'react';
 import { NavigationContainer, CommonActions } from '@react-navigation/native';
 import OfflineBanner from '../components/common/OfflineBanner';
@@ -15,9 +14,11 @@ import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+let ExpoNotifications = null;
+try { ExpoNotifications = require('expo-notifications'); } catch (_) {}
+
 
 // AUTH SCREENS
-import SplashScreen from '../screens/auth/SplashScreen';
 import LegalittIntroScreen from '../screens/auth/LegalittIntroScreen';
 import RoleSelectScreen from '../screens/auth/RoleSelectScreen';
 import OnboardingScreen from '../screens/auth/OnboardingScreen';
@@ -45,10 +46,6 @@ import DocumentForensicReviewScreen from '../screens/client/DocumentForensicRevi
 import DocumentForensicPaymentScreen from '../screens/client/DocumentForensicPaymentScreen';
 import DocumentForensicSuccessScreen from '../screens/client/DocumentForensicSuccessScreen';
 import DocumentForensicTrackScreen from '../screens/client/DocumentForensicTrackScreen';
-import DocumentForensicAnalysisScreen from '../screens/client/DocumentForensicAnalysisScreen';
-import DocumentForensicExpertReviewScreen from '../screens/client/DocumentForensicExpertReviewScreen';
-import DocumentForensicReportReadyScreen from '../screens/client/DocumentForensicReportReadyScreen';
-import DocumentForensicCompleteScreen from '../screens/client/DocumentForensicCompleteScreen';
 import FIRFormScreen from '../screens/client/FIRFormScreen';
 import FIRPreviewScreen from '../screens/client/FIRPreviewScreen';
 import AILegalNoticeScreen from '../screens/client/AILegalNoticeScreen';
@@ -63,13 +60,11 @@ import PropertyResearchPaymentScreen from '../screens/client/PropertyResearchPay
 import PropertyResearchSuccessScreen from '../screens/client/PropertyResearchSuccessScreen';
 import PropertyResearchTrackScreen from '../screens/client/PropertyResearchTrackScreen';
 import PropertyResearchChecklistScreen from '../screens/client/PropertyResearchChecklistScreen';
-import PropertyResearchLockScreen from '../screens/client/PropertyResearchLockScreen';
 
 // LEGAL ADVICE CONSULTATION SCREENS
 import LegalAdviceLandingScreen from '../screens/client/LegalAdviceLandingScreen';
 import LegalMatterScreen from '../screens/client/LegalMatterScreen';
 import ConsultationDetailsScreen from '../screens/client/ConsultationDetailsScreen';
-import ReviewPaymentScreen from '../screens/client/ReviewPaymentScreen';
 import ConsultationScheduledScreen from '../screens/client/ConsultationScheduledScreen';
 import TrackConsultationScreen from '../screens/client/TrackConsultationScreen';
 import ConsultationCompletedScreen from '../screens/client/ConsultationCompletedScreen';
@@ -86,7 +81,6 @@ import CallHistoryScreen from '../screens/shared/CallHistoryScreen';
 import IncomingCallScreen from '../screens/shared/IncomingCallScreen';
 import CallFeedbackScreen from '../screens/shared/CallFeedbackScreen';
 import SupportScreen from '../screens/shared/SupportScreen';
-import VideoCallScreen from '../screens/VideoCallScreen';
 
 // ADVOCATE SCREENS
 import AdvocateStack from './AdvocateStack';
@@ -360,7 +354,7 @@ const AppNavigator = () => {
   }, [isAuthenticated, isRestoring]);
 
   // ─── SYNCHRONIZED SPLASH ANIMATION GATE ─────────────────────────────────
-  // Render LegalittIntroScreen until the logo reveal animation completion event fires,
+  // Keep the navigation tree gated until the bundled intro video finishes,
   // AND the auth state restoration is completely finished.
   // Prevents the navigation tree from rendering the wrong stack and then unmounting
   // active screens (like IncomingCall) when the auth state suddenly changes.
@@ -384,9 +378,18 @@ const AppNavigator = () => {
       let data = null;
       
       // 1. Check if app was launched directly by tapping a notification
-      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      const lastResponse = await ExpoNotifications?.getLastNotificationResponseAsync?.();
       if (lastResponse && lastResponse.notification.request.content.data?.type === 'incoming_call') {
-        data = lastResponse.notification.request.content.data;
+        const responseId = lastResponse.notification.request.identifier;
+        const handledId = await AsyncStorage.getItem('LAST_HANDLED_CALL_NOTIFICATION');
+        if (!responseId || handledId !== responseId) {
+          data = {
+            ...lastResponse.notification.request.content.data,
+            receivedAt: lastResponse.notification.date || Date.now(),
+          };
+          if (responseId) await AsyncStorage.setItem('LAST_HANDLED_CALL_NOTIFICATION', responseId);
+          await AsyncStorage.removeItem('PENDING_INCOMING_CALL');
+        }
       }
       
       // 2. Fallback to AsyncStorage (from background task)
@@ -408,7 +411,7 @@ const AppNavigator = () => {
               ...data,
               callerName: data.clientName || data.callerName || 'Caller',
               callerAvatar: data.clientAvatar || data.callerAvatar || null,
-              zegoToken: data.advocateToken || data.clientToken || null,
+              zegoToken: data.zegoToken || data.advocateToken || data.clientToken || null,
             });
           }
         } else {
@@ -444,6 +447,7 @@ const AppNavigator = () => {
               <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
               <Stack.Screen name="ChatList" component={ChatListScreen} />
               <Stack.Screen name="Chat" component={ChatScreen} />
+              <Stack.Screen name="DocumentViewer" component={DocumentViewerScreen} />
               <Stack.Screen name="MyBookings" component={MyBookingsScreen} />
               <Stack.Screen name="FIRDraft" component={FIRDraftScreen} />
               <Stack.Screen name="FIRTypeSelector" component={FIRDraftScreen} />
@@ -453,10 +457,6 @@ const AppNavigator = () => {
               <Stack.Screen name="DocumentForensicPayment" component={DocumentForensicPaymentScreen} />
               <Stack.Screen name="DocumentForensicSuccess" component={DocumentForensicSuccessScreen} />
               <Stack.Screen name="DocumentForensicTrack" component={DocumentForensicTrackScreen} />
-              <Stack.Screen name="DocumentForensicAnalysis" component={DocumentForensicAnalysisScreen} />
-              <Stack.Screen name="DocumentForensicExpertReview" component={DocumentForensicExpertReviewScreen} />
-              <Stack.Screen name="DocumentForensicReportReady" component={DocumentForensicReportReadyScreen} />
-              <Stack.Screen name="DocumentForensicComplete" component={DocumentForensicCompleteScreen} />
               <Stack.Screen name="FIRForm" component={FIRFormScreen} />
               <Stack.Screen name="FIRPreview" component={FIRPreviewScreen} />
               <Stack.Screen name="AILegalNotice" component={AILegalNoticeScreen} />
@@ -469,11 +469,9 @@ const AppNavigator = () => {
               <Stack.Screen name="PropertyResearchSuccess" component={PropertyResearchSuccessScreen} />
               <Stack.Screen name="PropertyResearchTrack" component={PropertyResearchTrackScreen} />
               <Stack.Screen name="PropertyResearchChecklist" component={PropertyResearchChecklistScreen} />
-              <Stack.Screen name="PropertyResearchLock" component={PropertyResearchLockScreen} />
               <Stack.Screen name="LegalAdviceLanding" component={LegalAdviceLandingScreen} />
               <Stack.Screen name="LegalMatter" component={LegalMatterScreen} />
               <Stack.Screen name="ConsultationDetails" component={ConsultationDetailsScreen} />
-              <Stack.Screen name="ReviewPayment" component={ReviewPaymentScreen} />
               <Stack.Screen name="ConsultationScheduled" component={ConsultationScheduledScreen} />
               <Stack.Screen name="TrackConsultation" component={TrackConsultationScreen} />
               <Stack.Screen name="ConsultationCompleted" component={ConsultationCompletedScreen} />
@@ -501,8 +499,13 @@ const AppNavigator = () => {
           ) : user?.role === 'advocate' ? (
             // ─── ADVOCATE PRACTICE MANAGEMENT FLOW (AUTHENTICATED) ────────
             <>
+              {user?.requiresAdvocateOnboarding && (
+                <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
+              )}
               <Stack.Screen name="AdvocateMain" component={AdvocateTabs} />
-              <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
+              {!user?.requiresAdvocateOnboarding && (
+                <Stack.Screen name="DocumentUpload" component={DocumentUploadScreen} />
+              )}
               <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
               <Stack.Screen name="Cases" component={CasesScreen} />
               <Stack.Screen name="CaseRequests" component={CaseRequestsScreen} />
@@ -527,7 +530,11 @@ const AppNavigator = () => {
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
               {/* ── NEW SCREENS FROM ASTITVA REPO ── */}
               <Stack.Screen name="AdvocateAnalytics" component={AdvocateAnalyticsScreen} />
+              <Stack.Screen name="AdvocateAppointmentCalendar" component={AdvocateAppointmentCalendarScreen} />
+              {/* Backward-compatible aliases for older dashboard buttons and deep links. */}
               <Stack.Screen name="AdvocateCalendar" component={AdvocateAppointmentCalendarScreen} />
+              <Stack.Screen name="AppointmentCalendar" component={AdvocateAppointmentCalendarScreen} />
+              <Stack.Screen name="Appointments" component={AdvocateAppointmentCalendarScreen} />
               <Stack.Screen name="AdvocateSettings" component={AdvocateSettingsScreen} />
               <Stack.Screen name="CallHistory" component={CallHistoryScreen} />
               <Stack.Screen name="Support" component={SupportScreen} />
@@ -547,6 +554,7 @@ const AppNavigator = () => {
               <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
               <Stack.Screen name="ChatList" component={ChatListScreen} />
               <Stack.Screen name="Chat" component={ChatScreen} />
+              <Stack.Screen name="DocumentViewer" component={DocumentViewerScreen} />
               <Stack.Screen name="MyBookings" component={MyBookingsScreen} />
               <Stack.Screen name="FIRDraft" component={FIRDraftScreen} />
               <Stack.Screen name="FIRTypeSelector" component={FIRDraftScreen} />
@@ -556,10 +564,6 @@ const AppNavigator = () => {
               <Stack.Screen name="DocumentForensicPayment" component={DocumentForensicPaymentScreen} />
               <Stack.Screen name="DocumentForensicSuccess" component={DocumentForensicSuccessScreen} />
               <Stack.Screen name="DocumentForensicTrack" component={DocumentForensicTrackScreen} />
-              <Stack.Screen name="DocumentForensicAnalysis" component={DocumentForensicAnalysisScreen} />
-              <Stack.Screen name="DocumentForensicExpertReview" component={DocumentForensicExpertReviewScreen} />
-              <Stack.Screen name="DocumentForensicReportReady" component={DocumentForensicReportReadyScreen} />
-              <Stack.Screen name="DocumentForensicComplete" component={DocumentForensicCompleteScreen} />
               <Stack.Screen name="FIRForm" component={FIRFormScreen} />
               <Stack.Screen name="FIRPreview" component={FIRPreviewScreen} />
               <Stack.Screen name="AILegalNotice" component={AILegalNoticeScreen} />
@@ -572,13 +576,11 @@ const AppNavigator = () => {
               <Stack.Screen name="PropertyResearchSuccess" component={PropertyResearchSuccessScreen} />
               <Stack.Screen name="PropertyResearchTrack" component={PropertyResearchTrackScreen} />
               <Stack.Screen name="PropertyResearchChecklist" component={PropertyResearchChecklistScreen} />
-              <Stack.Screen name="PropertyResearchLock" component={PropertyResearchLockScreen} />
 
               {/* LEGAL ADVICE CONSULTATION FLOW */}
               <Stack.Screen name="LegalAdviceLanding" component={LegalAdviceLandingScreen} />
               <Stack.Screen name="LegalMatter" component={LegalMatterScreen} />
               <Stack.Screen name="ConsultationDetails" component={ConsultationDetailsScreen} />
-              <Stack.Screen name="ReviewPayment" component={ReviewPaymentScreen} />
               <Stack.Screen name="ConsultationScheduled" component={ConsultationScheduledScreen} />
               <Stack.Screen name="TrackConsultation" component={TrackConsultationScreen} />
               <Stack.Screen name="ConsultationCompleted" component={ConsultationCompletedScreen} />

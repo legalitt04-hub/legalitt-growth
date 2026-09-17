@@ -125,6 +125,8 @@ const bookingSchema = new mongoose.Schema({
   aiDraft: { type: String },
   // Admin notes visible to admin team only
   adminNotes: { type: String },
+  archivedAt: { type: Date },
+  archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   // Issue description (verbose, from booking form)
   issueDescription: { type: String },
   issueCategory: { type: String },
@@ -174,4 +176,3 @@ bookingSchema.index({ clientCity: 1, status: 1 });         // For nearby advocat
 bookingSchema.index({ 'payment.razorpayOrderId': 1 }, { sparse: true });
 
 module.exports = mongoose.model('Booking', bookingSchema);
-

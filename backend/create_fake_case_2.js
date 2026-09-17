@@ -1,5 +1,7 @@
+require('dotenv').config();
 const mongoose = require('mongoose');
-const uri = "mongodb+srv://legalitt_admin:iIbMGpbZSMkFf16G@legalitt-prod.sjiugqg.mongodb.net/legalitt?retryWrites=true&w=majority";
+const uri = process.env.MONGODB_URI;
+if (!uri) throw new Error('MONGODB_URI is required');
 const Case = require('./src/models/Case');
 const User = require('./src/models/User');
 const Advocate = require('./src/models/Advocate');

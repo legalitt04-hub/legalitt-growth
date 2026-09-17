@@ -22,7 +22,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { authAPI } from '../../services/api';
-import Constants from 'expo-constants';
 
 const OTPScreen = ({ navigation, route }) => {
   const { email, role, mode, password: loginPassword, registerData } = route.params;
@@ -112,7 +111,7 @@ const OTPScreen = ({ navigation, route }) => {
           const response = await login(email.trim().toLowerCase(), loginPassword);
           if (!response.success) Alert.alert('Verification failed', response.message || 'OTP verification failed');
         } else if (registerData?.password) {
-          await handleCompleteRegistration(registerData.password);
+          await handleCompleteRegistration(registerData.password, data.registrationToken);
         } else {
           setOtpVerified(true);
         }
@@ -127,7 +126,7 @@ const OTPScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleCompleteRegistration = async (overridePassword) => {
+  const handleCompleteRegistration = async (overridePassword, registrationToken) => {
     if (submitting) return;
 
     const passToUse = overridePassword || newPassword;
@@ -148,7 +147,6 @@ const OTPScreen = ({ navigation, route }) => {
 
     setSubmitting(true);
     try {
-      const mobileAppSecret = Constants.expoConfig?.extra?.MOBILE_APP_SECRET || 'mock_captcha_token';
       const rawName = registerData?.name || email.split('@')[0];
       const cleanName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
 
@@ -158,7 +156,7 @@ const OTPScreen = ({ navigation, route }) => {
         password: passToUse,
         role: role || 'client',
         barCouncilId: registerData?.barCouncilId || undefined,
-        captchaToken: mobileAppSecret,
+        registrationToken,
       });
 
       if (!response.success) {
@@ -176,7 +174,7 @@ const OTPScreen = ({ navigation, route }) => {
 
   const handleResendOTP = async () => {
     try {
-      await authAPI.sendOTP(email.trim().toLowerCase());
+      await authAPI.sendOTP(email.trim().toLowerCase(), role || 'client');
       startCountdown();
     } catch (err) {
       console.log('Error triggering OTP resend:', err.message);

@@ -21,8 +21,8 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
  * @param {string} body - Notification body/message
  * @param {string} channelId - Optional Android channel ID
  */
-const sendPushNotification = async (expoPushToken, title, body, data = {}, channelId = 'chat-messages') => {
-  if (!expoPushToken || !expoPushToken.startsWith('ExponentPushToken')) {
+const sendPushNotification = async (expoPushToken, title, body, data = {}, channelId = 'messages') => {
+  if (!expoPushToken || !/^(Exponent|Expo)PushToken\[/.test(expoPushToken)) {
     return; // Invalid or missing token — skip silently
   }
 
@@ -43,7 +43,7 @@ const sendPushNotification = async (expoPushToken, title, body, data = {}, chann
       }
     });
   } catch (err) {
-    logger.warn(`Push notification failed for token ${expoPushToken}: ${err.message}`);
+    logger.warn(`Push notification failed: ${err.message}`);
   }
 };
 
@@ -52,7 +52,7 @@ const sendPushNotification = async (expoPushToken, title, body, data = {}, chann
  * @param {Array<{token, title, body, data}>} notifications
  */
 const sendBatchPushNotifications = async (notifications) => {
-  const valid = notifications.filter(n => n.token?.startsWith('ExponentPushToken'));
+  const valid = notifications.filter(n => /^(Exponent|Expo)PushToken\[/.test(n.token || ''));
   if (!valid.length) return;
 
   const messages = valid.map(n => ({
@@ -62,7 +62,7 @@ const sendBatchPushNotifications = async (notifications) => {
     body: n.body,
     data: n.data || {},
     priority: 'high',
-    channelId: 'chat-messages',
+    channelId: 'messages',
   }));
 
   try {

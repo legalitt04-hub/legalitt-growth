@@ -2,27 +2,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   FlatList, Image, KeyboardAvoidingView, Platform,
-  StatusBar, ActivityIndicator, Alert, Linking
+  StatusBar, ActivityIndicator, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-
-// Safe lazy-load: expo-notifications crashes if ExpoPushTokenManager native module is missing
-let Notifications = null;
-try { Notifications = require('expo-notifications'); } catch (e) {}
-
-// Configure notification handler only if module loaded
-if (Notifications) {
-  try {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
-  } catch (e) {}
-}
 
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -32,7 +15,7 @@ import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../constants/theme';
 import { formatDate } from '../../utils/helpers';
 import { useNetwork } from '../../context/NetworkContext';
-import { getSocket } from '../../services/socket';
+import { getSocket, initiateCall } from '../../services/socket';
 
 const ChatScreen = ({ navigation, route }) => {
   const {
@@ -47,17 +30,32 @@ const ChatScreen = ({ navigation, route }) => {
   const {
     messages, loading, loadingMore, hasMore, connected, isTyping, error,
     sendMessage, sendTyping, sendStopTyping, loadMoreMessages,
-  } = useChat(chatId, user?._id);
+  } = useChat(chatId, userData._id);
 
   const flatListRef = useRef(null);
   const [text, setText]       = useState('');
   const [sharing, setSharing] = useState(false);
   const [showOfflineBanner, setShowOfflineBanner] = useState(false);
+  const [chatInitializing, setChatInitializing]   = useState(true);
+
+  // Mark as initialized after first connection OR after 12s timeout
   useEffect(() => {
-    if (connected) { setShowOfflineBanner(false); return; }
-    const timer = setTimeout(() => setShowOfflineBanner(true), 3000);
-    return () => clearTimeout(timer);
+    if (connected) {
+      setChatInitializing(false);
+      setShowOfflineBanner(false);
+      return;
+    }
+    // Give Render backend 12 seconds to cold-start before showing banner
+    const initTimer = setTimeout(() => setChatInitializing(false), 12000);
+    return () => clearTimeout(initTimer);
   }, [connected]);
+
+  useEffect(() => {
+    // Only show banner after initialization period is over
+    if (chatInitializing || connected) { setShowOfflineBanner(false); return; }
+    const timer = setTimeout(() => setShowOfflineBanner(true), 5000);
+    return () => clearTimeout(timer);
+  }, [connected, chatInitializing]);
 
   // ── Countdown Timer Logic ─────────────────────────────────────
   const [timeRemaining, setTimeRemaining] = useState(null);
@@ -70,7 +68,7 @@ const ChatScreen = ({ navigation, route }) => {
     const fetchAndStartTimer = async () => {
       try {
         // Fetch buffer hours from settings
-        const res = await api.get('/settings/public');
+        const res = await api.get('/settings');
         const bufferHours = res.data?.data?.postConsultationBufferHours ?? 24;
         
         const scheduledStart = new Date(bookingDate).getTime();
@@ -104,33 +102,6 @@ const ChatScreen = ({ navigation, route }) => {
     return () => clearInterval(timerInterval);
   }, [bookingDate]);
 
-  // ── Register push token on mount ──────────────────────────────
-  useEffect(() => {
-    const registerPushToken = async () => {
-      // Guard: expo-notifications not available in all builds
-      if (!Notifications) return;
-      try {
-        const { status: existing } = await Notifications.getPermissionsAsync();
-        let finalStatus = existing;
-        if (existing !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-        if (finalStatus !== 'granted') return;
-
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        const expoPushToken = tokenData.data;
-
-        // Register with backend
-        await api.post('/users/push-token', { expoPushToken });
-      } catch (err) {
-        // Silently fail — push is optional
-        console.log('Push registration skipped:', err.message);
-      }
-    };
-    registerPushToken();
-  }, []);
-
   // ── Send message handler ──────────────────────────────────────
   const handleSend = () => {
     if (!text.trim()) return;
@@ -152,6 +123,46 @@ const ChatScreen = ({ navigation, route }) => {
   const handleLoadMore = useCallback(() => {
     if (!loadingMore && hasMore) loadMoreMessages();
   }, [loadingMore, hasMore, loadMoreMessages]);
+
+  const startCall = async (mode) => {
+    if (callMode === 'chat') {
+      Alert.alert('Chat Only', 'This consultation is chat-based. Voice/video calls are not included.');
+      return;
+    }
+    if (!bookingId) {
+      Alert.alert('Call unavailable', 'A paid booking is required to start a call.');
+      return;
+    }
+
+    try {
+      const { data } = await api.get(`/bookings/${bookingId}/can-join-call`);
+      if (data?.canJoin === false) throw new Error(data.message || 'The call window is not open.');
+      const callConfig = data?.data || {};
+      await initiateCall({
+        bookingId,
+        chatId,
+        zegoRoomId: callConfig.zegoRoomId,
+        mode,
+      });
+
+      const isAdvocate = userData?.role === 'advocate';
+      navigation.navigate(isAdvocate ? 'AdvocateCall' : 'VideoCall', {
+        zegoRoomId: callConfig.zegoRoomId,
+        zegoToken: callConfig.zegoToken,
+        zegoAppId: callConfig.zegoAppId || 0,
+        advocateName: isAdvocate ? undefined : advocateName,
+        clientName: isAdvocate ? advocateName : undefined,
+        myUserId: String(userData._id || ''),
+        myUserName: String(userData.name || 'User'),
+        mode,
+        bookingId,
+        advocateUserId: isAdvocate ? userData._id : (advocateUserId || advocateId),
+        clientId: isAdvocate ? advocateId : userData._id,
+      });
+    } catch (err) {
+      Alert.alert('Call unavailable', err.response?.data?.message || err.message || 'Could not prepare the secure call.');
+    }
+  };
 
   // ── Share image/document ──────────────────────────────────────
   const handleShareDocument = async () => {
@@ -247,7 +258,7 @@ const ChatScreen = ({ navigation, route }) => {
 
   // ── Render individual message bubble ─────────────────────────
   const renderMessage = useCallback(({ item: msg }) => {
-    const isMe = msg.sender === user?._id || msg.sender?._id === user?._id;
+    const isMe = msg.sender === userData._id || msg.sender?._id === userData._id;
     const isDoc = msg.messageType === 'file' || msg.messageType === 'document' || (msg.fileUrl && !msg.fileUrl.match(/\.(jpeg|jpg|gif|png)$/i));
     const isPending = msg.pending;
 
@@ -288,7 +299,13 @@ const ChatScreen = ({ navigation, route }) => {
         <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem, isPending && styles.bubblePending]}>
           {isDoc ? (
             <TouchableOpacity
-              onPress={() => msg.fileUrl && Linking.openURL(msg.fileUrl)}
+              onPress={() => msg.fileUrl && navigation.navigate('DocumentViewer', {
+                documentUrl: msg.fileUrl,
+                fileName: msg.fileName || msg.content || 'Shared document',
+                clientName: advocateName || 'Legal Counsel',
+                caseTitle: 'Consultation document',
+                hasDocument: true,
+              })}
               style={styles.documentRow}
             >
               <Ionicons name="document-text" size={24} color={isMe ? '#FFFFFF' : COLORS.primary} />
@@ -326,7 +343,7 @@ const ChatScreen = ({ navigation, route }) => {
         </View>
       </View>
     );
-  }, [user?._id, advocateAvatar, advocateName]);
+  }, [userData._id, advocateAvatar, advocateName, navigation]);
 
   const renderListHeader = () => {
     if (!hasMore) return (
@@ -380,8 +397,10 @@ const ChatScreen = ({ navigation, route }) => {
           <View style={styles.headerMeta}>
             <Text style={styles.participantName} numberOfLines={1}>{advocateName || 'Legal Counsel'}</Text>
             <View style={styles.statusRow}>
-              <View style={[styles.statusDot, connected ? styles.dotOnline : styles.dotOffline]} />
-              <Text style={styles.statusLabel}>{connected ? 'online' : 'connecting...'}</Text>
+              <View style={[styles.statusDot, connected ? styles.dotOnline : (chatInitializing ? styles.dotConnecting : styles.dotOffline)]} />
+              <Text style={styles.statusLabel}>
+                {connected ? 'online' : chatInitializing ? 'connecting…' : isConnected ? '' : 'offline'}
+              </Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -390,44 +409,7 @@ const ChatScreen = ({ navigation, route }) => {
           {/* Voice Call Button */}
           <TouchableOpacity
             style={styles.callBtn}
-            onPress={async () => {
-              if (callMode === 'chat') {
-                Alert.alert('Chat Only', 'This consultation is chat-based. Voice/video calls are not included.');
-                return;
-              }
-
-              const effectiveRoomId = zegoRoomId || (bookingId ? `legalitt-${bookingId}` : null) || (chatId ? `legalitt-${chatId}` : null);
-              if (!effectiveRoomId) return Alert.alert('Error', 'Could not start call.');
-
-              const { connectSocket } = require('../../services/socket');
-              const socket = getSocket() || await connectSocket();
-              if (socket && (bookingId || chatId)) {
-                socket.emit('initiate_call', {
-                  bookingId,
-                  chatId,
-                  zegoRoomId: effectiveRoomId,
-                  mode: 'voice',
-                });
-              } else {
-                return Alert.alert('Error', 'Could not connect to call server. Please try again.');
-              }
-
-              const userRole = userData?.role || 'client';
-              const isAdvocate = userRole === 'advocate';
-              navigation.navigate(isAdvocate ? 'AdvocateCall' : 'VideoCall', {
-                zegoRoomId:  effectiveRoomId,
-                zegoToken,
-                zegoAppId:   zegoAppId || 0,
-                advocateName: isAdvocate ? undefined : advocateName,
-                clientName:   isAdvocate ? advocateName : undefined,
-                myUserId:    String(userData._id  || ''),
-                myUserName:  String(userData.name || 'User'),
-                mode:        'voice',
-                bookingId,
-                advocateUserId: isAdvocate ? userData._id : advocateId, // target is advocateId if client is calling
-                clientId:       isAdvocate ? advocateId : userData._id,        // pass explicitly for backend tracking
-              });
-            }}
+            onPress={() => startCall('voice')}
           >
             <Ionicons name="call-outline" size={20} color={COLORS.primary} />
           </TouchableOpacity>
@@ -435,45 +417,7 @@ const ChatScreen = ({ navigation, route }) => {
           {/* Video Call Button */}
           <TouchableOpacity
             style={styles.callBtn}
-            onPress={async () => {
-              if (callMode === 'chat') {
-                Alert.alert('Chat Only', 'This consultation is chat-based. Voice/video calls are not included.');
-                return;
-              }
-
-              const effectiveRoomId = zegoRoomId || (bookingId ? `legalitt-${bookingId}` : null) || (chatId ? `legalitt-${chatId}` : null);
-              if (!effectiveRoomId) return Alert.alert('Error', 'Could not start call.');
-
-              const { connectSocket } = require('../../services/socket');
-              const socket = getSocket() || await connectSocket();
-              if (socket && (bookingId || chatId)) {
-                Alert.alert('Debug', 'Sending call to server...');
-                socket.emit('initiate_call', {
-                  bookingId,
-                  chatId,
-                  zegoRoomId: effectiveRoomId,
-                  mode: 'video',
-                });
-              } else {
-                return Alert.alert('Error', 'Could not connect to call server. Please try again.');
-              }
-
-              const userRole = userData?.role || 'client';
-              const isAdvocate = userRole === 'advocate';
-              navigation.navigate(isAdvocate ? 'AdvocateCall' : 'VideoCall', {
-                zegoRoomId:  effectiveRoomId,
-                zegoToken,
-                zegoAppId:   zegoAppId || 0,
-                advocateName: isAdvocate ? undefined : advocateName,
-                clientName:   isAdvocate ? advocateName : undefined,
-                myUserId:    String(userData._id  || ''),
-                myUserName:  String(userData.name || 'User'),
-                mode:        'video',
-                bookingId,
-                advocateUserId: isAdvocate ? userData._id : advocateId, // target is advocateId if client is calling
-                clientId:       isAdvocate ? advocateId : userData._id,        // pass explicitly for backend tracking
-              });
-            }}
+            onPress={() => startCall('video')}
           >
             <Ionicons name="videocam-outline" size={20} color={COLORS.primary} />
           </TouchableOpacity>
@@ -509,12 +453,14 @@ const ChatScreen = ({ navigation, route }) => {
         </View>
       )}
 
-      {/* Error / Offline banner */}
+      {/* Error / Offline banner — only show after init + delay */}
       {(showOfflineBanner && (!connected || !isConnected)) && (
         <View style={styles.offlineBanner}>
           <Ionicons name="cloud-offline-outline" size={14} color="#FFFFFF" />
           <Text style={styles.offlineBannerText}>
-            {!isConnected ? 'Connection lost. Working offline' : 'Connecting to chat... Messages will send when back online'}
+            {!isConnected
+              ? 'No internet connection. Working offline.'
+              : 'Chat server reconnecting… messages queued'}
           </Text>
         </View>
       )}
@@ -623,8 +569,9 @@ const styles = StyleSheet.create({
   participantName: { fontSize: 14, fontWeight: '700', color: '#2E2A26' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
-  dotOnline: { backgroundColor: '#10B981' },
-  dotOffline: { backgroundColor: '#9CA3AF' },
+  dotOnline:     { backgroundColor: '#10B981' },
+  dotConnecting: { backgroundColor: '#F59E0B' }, // amber - connecting
+  dotOffline:    { backgroundColor: '#9CA3AF' }, // gray - truly offline/disconnected
   statusLabel: { fontSize: 10, color: '#6D6A66', fontWeight: '500' },
   callBtn: {
     width: 36, height: 36, borderRadius: 18,

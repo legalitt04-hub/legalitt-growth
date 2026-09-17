@@ -47,6 +47,10 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'ValidationError') error = handleValidationErrorDB(error);
   if (err.name === 'JsonWebTokenError') error = handleJWTError();
   if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
+  if (err.name === 'MulterError') error = new AppError(
+    err.code === 'LIMIT_FILE_SIZE' ? 'Uploaded file is too large.' : err.message,
+    400
+  );
 
   // Sentry Integration Error Capture
   if (process.env.SENTRY_DSN) {

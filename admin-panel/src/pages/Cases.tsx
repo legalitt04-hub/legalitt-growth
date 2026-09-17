@@ -5,7 +5,8 @@ import {
   Eye, Edit2, Trash2, ChevronLeft, ChevronRight,
   List, LayoutGrid, User, Calendar, FileText, Clock,
   CheckCircle2, AlertCircle, RotateCcw, XCircle,
-  Paperclip, Upload, Shield, UserX, CheckCircle, AlertTriangle
+  Paperclip, Upload, Shield, UserX, CheckCircle, AlertTriangle,
+  MessageSquare
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -39,7 +40,7 @@ const STATUS_CONFIG = {
   pending:     { label: 'Pending',     color: 'text-amber-700 bg-amber-50 border-amber-200',   icon: <Clock className="w-3 h-3" />,        dot: 'bg-amber-500' },
   in_progress: { label: 'In Progress', color: 'text-violet-700 bg-violet-50 border-violet-200',icon: <RotateCcw className="w-3 h-3" />,    dot: 'bg-violet-500' },
   closed:      { label: 'Closed',      color: 'text-gray-700 bg-gray-100 border-gray-200',     icon: <XCircle className="w-3 h-3" />,      dot: 'bg-gray-400' },
-  resolved:    { label: 'Resolved',    color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
+  resolved:    { label: 'Completed',   color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
 };
 
 const KANBAN_COLS: (keyof typeof STATUS_CONFIG)[] = ['open', 'pending', 'in_progress', 'resolved', 'closed'];
@@ -78,6 +79,8 @@ export default function Cases() {
 
   // Modals
   const [selectedCase, setSelectedCase] = useState<Case | null>(null);
+  const [caseMessages, setCaseMessages] = useState<any[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
   const [editCase, setEditCase] = useState<Case | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [uploadModalCase, setUploadModalCase] = useState<Case | null>(null);
@@ -88,6 +91,20 @@ export default function Cases() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   const LIMIT = 15;
+
+  const openCaseDetails = async (item: Case) => {
+    setSelectedCase(item);
+    setCaseMessages([]);
+    setChatLoading(true);
+    try {
+      const { data } = await api.get(`/admin/bookings/${item._id}/chat-messages`);
+      setCaseMessages(data.data?.messages || []);
+    } catch {
+      setCaseMessages([]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const fetchCases = useCallback(async () => {
     setLoading(true);
@@ -279,7 +296,7 @@ export default function Cases() {
             {sc.icon} {sc.label}
           </span>
           <div className="flex gap-1">
-            <button onClick={() => setSelectedCase(c)} title="View Case Details" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100"><Eye className="w-3.5 h-3.5" /></button>
+            <button onClick={() => openCaseDetails(c)} title="View Case Details" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100"><Eye className="w-3.5 h-3.5" /></button>
             <button onClick={() => setEditCase({ ...c })} title="Edit Status & Assign Advocate" className="p-1.5 rounded-lg bg-teal-50 text-teal-600 hover:bg-teal-100"><Edit2 className="w-3.5 h-3.5" /></button>
             <button onClick={() => setUploadModalCase(c)} title="Upload Document" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100"><Paperclip className="w-3.5 h-3.5" /></button>
           </div>
@@ -633,6 +650,35 @@ export default function Cases() {
                       <p className="text-xs text-gray-400 italic">No advocate documents uploaded yet</p>
                     )}
                   </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                  <p className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <MessageSquare size={13} /> Complete Chat History ({caseMessages.length})
+                  </p>
+                  {chatLoading ? (
+                    <p className="text-xs text-slate-400">Loading chat history...</p>
+                  ) : caseMessages.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">No chat messages for this booking.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {caseMessages.map((message: any) => (
+                        <div key={message._id} className="bg-white border border-slate-100 rounded-xl p-3">
+                          <div className="flex justify-between gap-2 mb-1">
+                            <span className="text-[11px] font-bold text-slate-700">{message.senderName} · {message.senderRole}</span>
+                            <span className="text-[10px] text-slate-400">{new Date(message.createdAt).toLocaleString()}</span>
+                          </div>
+                          {message.fileUrl ? (
+                            <a href={fixCloudinaryPdfUrl(message.fileUrl)} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-600 hover:underline">
+                              📎 {message.fileName || 'Open attachment'}
+                            </a>
+                          ) : (
+                            <p className="text-xs text-slate-600 whitespace-pre-wrap">{message.content}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -113,7 +113,7 @@ const Illustration2 = () => (
   <View style={ill.wrap}>
     <View style={[ill.bgCircle, { backgroundColor: 'rgba(176, 156, 133, 0.15)' }]} />
 
-    {/* Phone mockup */}
+    {/* Phone preview */}
     <View style={ill.phone}>
       {/* Header */}
       <View style={ill.phoneHeader}>

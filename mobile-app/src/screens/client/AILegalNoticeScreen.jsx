@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import * as DocumentPicker from 'expo-document-picker';
-import { legalAdviceAPI, paymentAPI, api } from '../../services/api';
+import { legalAdviceAPI, paymentAPI, uploadAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import RazorpayCheckout from 'react-native-razorpay';
 import { usePricing } from '../../context/PricingContext';
@@ -140,24 +140,13 @@ export default function AILegalNoticeScreen({ navigation }) {
         prev.map(doc => (doc.id === id ? { ...doc, uploading: true, progress: 0.5 } : doc))
       );
 
-      const formDataUpload = new FormData();
-      formDataUpload.append('file', {
-        uri: file.uri,
-        name: file.name || `document_${id}.pdf`,
-        type: file.mimeType || 'application/pdf',
-      });
-
-      let uploadedUrl = null;
-      try {
-        const response = await api.post('/fir/upload', formDataUpload, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        if (response.data?.success) {
-          uploadedUrl = response.data.data.url;
-        }
-      } catch (err) {
-        console.warn('Upload route fallback:', err?.message);
-      }
+      const response = await uploadAPI.uploadFile(
+        file.uri,
+        file.name || `document_${id}.pdf`,
+        file.mimeType || 'application/pdf'
+      );
+      const uploadedUrl = response.data?.data?.url;
+      if (!uploadedUrl) throw new Error('The server did not return a document URL.');
 
       setDocuments(prev =>
         prev.map(doc => {
@@ -166,7 +155,7 @@ export default function AILegalNoticeScreen({ navigation }) {
               ...doc,
               uploading: false,
               uploaded: true,
-              uploadedUrl: uploadedUrl || file.uri,
+              uploadedUrl,
               fileName: file.name,
             };
           }
@@ -179,7 +168,7 @@ export default function AILegalNoticeScreen({ navigation }) {
       setDocuments(prev =>
         prev.map(doc => (doc.id === id ? { ...doc, uploading: false } : doc))
       );
-      Alert.alert('Upload Failed', 'Could not upload document. Please try again.');
+      Alert.alert('Upload Failed', err?.message || 'Could not upload document. Please try again.');
     }
   };
 
@@ -207,6 +196,8 @@ export default function AILegalNoticeScreen({ navigation }) {
     }
     if (!senderName.trim()) return Alert.alert('Required', 'Please enter your name.');
     if (!senderPhone.trim()) return Alert.alert('Required', 'Please enter your phone number.');
+    if (!recipientName.trim()) return Alert.alert('Required', 'Please enter the legal notice recipient name.');
+    if (!recipientAddress.trim()) return Alert.alert('Required', 'Please enter the recipient address.');
 
     setIsSubmitting(true);
     try {
@@ -217,12 +208,12 @@ export default function AILegalNoticeScreen({ navigation }) {
         consultationMode: 'chat',
         serviceType: 'legal_notice',
         issueCategory: selectedCategory,
-        issueDescription: `${issueDescription}\n\nRecipient: ${recipientName} (${recipientRelation})\nAddress: ${recipientAddress}`,
+        issueDescription: `${issueDescription.trim()}\n\nSender: ${senderName.trim()}\nSender phone: ${senderPhone.trim()}\nSender email: ${senderEmail.trim() || 'Not provided'}\nSender address: ${senderAddress.trim() || 'Not provided'}\n\nRecipient: ${recipientName.trim()}${recipientRelation.trim() ? ` (${recipientRelation.trim()})` : ''}\nRecipient phone: ${recipientPhone.trim() || 'Not provided'}\nRecipient email: ${recipientEmail.trim() || 'Not provided'}\nRecipient address: ${recipientAddress.trim()}`,
         preferredSlot: 'Within 24 Hours',
         documents: documents.filter(d => d.uploaded && d.uploadedUrl).map(d => ({
           url: d.uploadedUrl,
-          name: d.title,
-          type: 'pdf',
+          name: d.fileName || d.title,
+          type: d.fileName?.toLowerCase().endsWith('.pdf') ? 'pdf' : 'document',
         })),
         clientCity: senderAddress || userData.address?.city || '',
         amount,
@@ -242,42 +233,29 @@ export default function AILegalNoticeScreen({ navigation }) {
       const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
 
       let paymentData;
-      if (orderId?.startsWith('order_mock_')) {
-        paymentData = {
-          razorpay_order_id: orderId,
-          razorpay_payment_id: `pay_mock_${Date.now()}`,
-          razorpay_signature: 'mock_signature',
-        };
-      } else {
-        try {
-          paymentData = await RazorpayCheckout.open({
-            description: 'Legal Notice Drafting & Review',
-            image: 'https://res.cloudinary.com/legalitt/image/upload/v1/legalitt-logo.png',
-            currency: currency || 'INR',
-            key: keyId,
-            amount: orderAmount,
-            name: 'Legalitt',
-            order_id: orderId,
-            prefill: {
-              email: senderEmail || userData.email,
-              contact: senderPhone.replace(/\D/g, '').slice(-10),
-              name: senderName,
-            },
-            theme: { color: '#B09C85' },
-          });
-        } catch (rzpErr) {
-          if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description?.includes('cancel')) {
-            setIsSubmitting(false);
-            Alert.alert('Payment Cancelled', 'You cancelled the payment. Request not submitted.');
-            return;
-          }
-          console.warn('Razorpay checkout fallback:', rzpErr);
-          paymentData = {
-            razorpay_order_id: orderId,
-            razorpay_payment_id: `pay_test_${Date.now()}`,
-            razorpay_signature: 'test_signature',
-          };
+      try {
+        paymentData = await RazorpayCheckout.open({
+          description: 'Legal Notice Drafting & Review',
+          image: 'https://res.cloudinary.com/legalitt/image/upload/v1/legalitt-logo.png',
+          currency: currency || 'INR',
+          key: keyId,
+          amount: orderAmount,
+          name: 'Legalitt',
+          order_id: orderId,
+          prefill: {
+            email: senderEmail || userData.email,
+            contact: senderPhone.replace(/\D/g, '').slice(-10),
+            name: senderName,
+          },
+          theme: { color: '#B09C85' },
+        });
+      } catch (rzpErr) {
+        if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description?.includes('cancel')) {
+          setIsSubmitting(false);
+          Alert.alert('Payment Cancelled', 'You cancelled the payment. Request not submitted.');
+          return;
         }
+        throw rzpErr;
       }
 
       // Step 3: Confirm payment
@@ -625,7 +603,7 @@ export default function AILegalNoticeScreen({ navigation }) {
                 <View style={styles.summaryCard}>
                   <SummaryRow
                     title="Client Information"
-                    lines={[senderName || 'Ananya Sharma', senderPhone || '+91 98765 43210', senderAddress || 'Mumbai, Maharashtra']}
+                    lines={[senderName || 'Not provided', senderPhone || 'Not provided', senderAddress || 'Not provided']}
                     onEdit={() => setCurrentStep(3)}
                   />
 
@@ -633,7 +611,7 @@ export default function AILegalNoticeScreen({ navigation }) {
 
                   <SummaryRow
                     title="Recipient Information"
-                    lines={[recipientName || 'Rajesh Kumar', recipientRelation ? `Relation: ${recipientRelation}` : null, recipientAddress || 'Mumbai, Maharashtra'].filter(Boolean)}
+                    lines={[recipientName || 'Not provided', recipientRelation ? `Relation: ${recipientRelation}` : null, recipientAddress || 'Not provided'].filter(Boolean)}
                     onEdit={() => setCurrentStep(2)}
                   />
 
@@ -641,7 +619,7 @@ export default function AILegalNoticeScreen({ navigation }) {
 
                   <SummaryRow
                     title="Notice Type & Issue"
-                    lines={[selectedCategory || 'Property Dispute', issueDescription || 'Security deposit refund delay notice request.']}
+                    lines={[selectedCategory || 'Not selected', issueDescription || 'Not provided']}
                     onEdit={() => setCurrentStep(1)}
                   />
 

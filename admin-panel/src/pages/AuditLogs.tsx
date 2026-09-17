@@ -60,7 +60,7 @@ export default function AuditLogs() {
                 </div>
 
                 <div className="flex items-center gap-4 text-slate-500">
-                  <span className="font-mono bg-slate-100 px-2 py-0.5 rounded">{log.ipAddress || '127.0.0.1'}</span>
+                  <span className="font-mono bg-slate-100 px-2 py-0.5 rounded">{log.ipAddress || 'Not recorded'}</span>
                   <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {new Date(log.createdAt).toLocaleString()}</span>
                 </div>
               </div>

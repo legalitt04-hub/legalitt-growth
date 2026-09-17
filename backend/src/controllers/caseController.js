@@ -4,6 +4,30 @@ const User = require('../models/User');
 const { Chat, Message } = require('../models/Chat');
 const { AppError } = require('../middlewares/errorHandler');
 
+const STAFF_ROLES = new Set([
+  'admin', 'super_admin', 'superadmin', 'support_executive', 'support',
+  'accounts', 'forensic_expert', 'property_verification',
+]);
+
+const getCaseAccess = async (legalCase, user) => {
+  if (STAFF_ROLES.has(user.role)) return { canRead: true, canManage: true };
+  const userId = user._id.toString();
+  const clientId = legalCase.client?._id?.toString() || legalCase.client?.toString();
+  if (clientId === userId) return { canRead: true, canManage: false };
+  if (user.role === 'advocate' && legalCase.advocate) {
+    const advocate = await Advocate.findById(legalCase.advocate._id || legalCase.advocate).select('user').lean();
+    if (advocate?.user?.toString() === userId) return { canRead: true, canManage: true };
+  }
+  return { canRead: false, canManage: false };
+};
+
+const requireCaseAccess = async (legalCase, user, manage = false) => {
+  const access = await getCaseAccess(legalCase, user);
+  if (!access.canRead || (manage && !access.canManage)) {
+    throw new AppError('Not authorized for this case.', 403);
+  }
+};
+
 // POST /api/cases
 exports.createCase = async (req, res, next) => {
   try {
@@ -14,6 +38,13 @@ exports.createCase = async (req, res, next) => {
 
     const client = await User.findById(clientId);
     if (!client) return next(new AppError('Client user not found.', 404));
+    const relationship = await Chat.findOne({
+      participants: { $all: [req.user._id, client._id] },
+      isActive: true,
+    }).select('_id').lean();
+    if (!relationship) {
+      return next(new AppError('An active client relationship is required to create a case.', 403));
+    }
 
     const newCase = await Case.create({
       title,
@@ -75,6 +106,7 @@ exports.getCase = async (req, res, next) => {
       .lean();
 
     if (!legalCase) return next(new AppError('Case not found.', 404));
+    await requireCaseAccess(legalCase, req.user);
 
     res.json({
       success: true,
@@ -92,6 +124,7 @@ exports.updateCase = async (req, res, next) => {
 
     const legalCase = await Case.findById(req.params.id);
     if (!legalCase) return next(new AppError('Case not found.', 404));
+    await requireCaseAccess(legalCase, req.user, true);
 
     if (title !== undefined) legalCase.title = title;
     if (description !== undefined) legalCase.description = description;
@@ -117,6 +150,7 @@ exports.addTimelineEvent = async (req, res, next) => {
 
     const legalCase = await Case.findById(req.params.id);
     if (!legalCase) return next(new AppError('Case not found.', 404));
+    await requireCaseAccess(legalCase, req.user, true);
 
     legalCase.timeline.push({
       title,
@@ -143,6 +177,7 @@ exports.addCaseNote = async (req, res, next) => {
 
     const legalCase = await Case.findById(req.params.id);
     if (!legalCase) return next(new AppError('Case not found.', 404));
+    await requireCaseAccess(legalCase, req.user, true);
 
     legalCase.notes.push({ note });
 
@@ -164,6 +199,7 @@ exports.addCaseDocument = async (req, res, next) => {
 
     const legalCase = await Case.findById(req.params.id);
     if (!legalCase) return next(new AppError('Case not found.', 404));
+    await requireCaseAccess(legalCase, req.user, true);
 
     legalCase.documents.push({ name, url });
     await legalCase.save();

@@ -47,16 +47,16 @@ export const AdvocatePerformance = () => {
                   <div className="flex items-center gap-2 mt-0.5">
                     <div className="flex items-center text-amber-500 text-xs font-medium">
                       <Star className="w-3 h-3 fill-amber-500 mr-1" />
-                      {adv.rating?.average?.toFixed(1) || '4.5'}
+                      {adv.rating?.count > 0 ? Number(adv.rating.average || 0).toFixed(1) : 'No rating'}
                     </div>
                     <span className="text-slate-300 text-xs">•</span>
-                    <span className="text-slate-500 text-xs">{adv.experience || 5} Yrs Exp</span>
+                    <span className="text-slate-500 text-xs">{adv.experience || 0} Yrs Exp</span>
                   </div>
                 </div>
               </div>
               
               <div className="text-right">
-                <p className="text-sm font-semibold text-slate-900">₹{adv.consultationFee || 500}</p>
+                <p className="text-sm font-semibold text-slate-900">₹{adv.consultationFee || 0}</p>
                 <p className="text-xs text-emerald-600 font-medium flex items-center justify-end gap-1 mt-0.5">
                   <TrendingUp className="w-3 h-3" />
                   Approved

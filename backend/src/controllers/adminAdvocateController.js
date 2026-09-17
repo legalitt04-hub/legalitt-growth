@@ -4,6 +4,7 @@
 const Advocate = require('../models/Advocate');
 const User = require('../models/User');
 const Withdrawal = require('../models/Withdrawal');
+const Review = require('../models/Review');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../utils/logger');
 const { sendWelcomeEmail } = require('../services/emailService');
@@ -12,7 +13,8 @@ const { createNotification } = require('../utils/notificationHelper');
 // ─── GET /api/v1/admin/advocates?status=pending ──────────────────────────────
 exports.getAdvocates = async (req, res, next) => {
   try {
-    const { status = 'all', page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 20, search } = req.query;
+    const status = req.query.status || req.query.verificationStatus || 'all';
     const skip = (Number(page) - 1) * Number(limit);
 
     let filter = {};
@@ -26,10 +28,13 @@ exports.getAdvocates = async (req, res, next) => {
         ],
         role: 'advocate',
       }).select('_id').lean();
-      filter.user = { $in: users.map(u => u._id) };
+      filter.$or = [
+        { user: { $in: users.map(u => u._id) } },
+        { barCouncilNumber: new RegExp(search, 'i') },
+      ];
     }
 
-    const [advocates, total] = await Promise.all([
+    const [advocates, total, statusCounts] = await Promise.all([
       Advocate.find(filter).lean()
         .populate('user', 'name email phone avatar createdAt')
         .sort({ createdAt: -1 })
@@ -37,19 +42,28 @@ exports.getAdvocates = async (req, res, next) => {
         .limit(Number(limit))
         .lean(),
       Advocate.countDocuments(filter),
+      Advocate.aggregate([
+        { $group: { _id: '$verificationStatus', count: { $sum: 1 } } },
+      ]),
     ]);
 
-    // Count by status for tabs
-    const [pendingCount, underReviewCount, approvedCount] = await Promise.all([
-      Advocate.countDocuments({ verificationStatus: 'pending' }),
-      Advocate.countDocuments({ verificationStatus: 'under_review' }),
-      Advocate.countDocuments({ verificationStatus: 'approved' }),
+    const advocateIds = advocates.map(advocate => advocate._id);
+    const reviewStats = await Review.aggregate([
+      { $match: { advocate: { $in: advocateIds }, isVerified: true } },
+      { $group: { _id: '$advocate', average: { $avg: '$rating' }, count: { $sum: 1 } } },
     ]);
+    const reviewMap = new Map(reviewStats.map(item => [String(item._id), { average: Math.round(item.average * 10) / 10, count: item.count }]));
+    const data = advocates.map(advocate => ({ ...advocate, rating: reviewMap.get(String(advocate._id)) || { average: 0, count: 0 } }));
+    const counts = statusCounts.reduce((result, item) => {
+      result[item._id || 'pending'] = item.count;
+      result.total += item.count;
+      return result;
+    }, { total: 0, pending: 0, under_review: 0, approved: 0, suspended: 0, rejected: 0 });
 
     res.json({
       success: true,
-      data: advocates,
-      counts: { pending: pendingCount, under_review: underReviewCount, approved: approvedCount },
+      data,
+      counts,
       pagination: { total, page: Number(page), pages: Math.ceil(total / Number(limit)) },
     });
   } catch (err) {
@@ -156,7 +170,9 @@ exports.getWithdrawals = async (req, res, next) => {
 
     const filter = status !== 'all' ? { status } : {};
 
-    const [withdrawals, total] = await Promise.all([
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const [withdrawals, total, statusCounts, pendingTotal, requestsToday] = await Promise.all([
       Withdrawal.find(filter).lean()
         .populate({ path: 'advocateUser', select: 'name email phone' })
         .populate({ path: 'advocate', select: 'wallet barCouncilNumber' })
@@ -165,17 +181,26 @@ exports.getWithdrawals = async (req, res, next) => {
         .limit(Number(limit))
         .lean(),
       Withdrawal.countDocuments(filter),
+      Withdrawal.aggregate([{ $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } }]),
+      Withdrawal.aggregate([
+        { $match: { status: 'pending' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
+      Withdrawal.countDocuments({ createdAt: { $gte: startOfToday } }),
     ]);
 
-    const pendingTotal = await Withdrawal.aggregate([
-      { $match: { status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
+    const counts = Object.fromEntries(statusCounts.map(item => [item._id, item.count]));
 
     res.json({
       success: true,
       data: withdrawals,
       pendingTotal: pendingTotal[0]?.total || 0,
+      stats: {
+        pendingCount: counts.pending || 0,
+        paidCount: counts.paid || 0,
+        rejectedCount: counts.rejected || 0,
+        requestsToday,
+      },
       pagination: { total, page: Number(page), pages: Math.ceil(total / Number(limit)) },
     });
   } catch (err) {

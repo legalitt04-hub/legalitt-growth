@@ -5,12 +5,31 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
+import api from '../../lib/api';
 
 const MainLayout = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, canAccess } = useAuth();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [branding, setBranding] = useState({ primaryColor: '#f59e0b', logoUrl: '/logo.png', faviconUrl: '/logo.png' });
+
+  useEffect(() => {
+    const applyBranding = (value: any) => {
+      if (!value) return;
+      setBranding((current) => ({ ...current, ...value }));
+      if (value.primaryColor) document.documentElement.style.setProperty('--brand-color', value.primaryColor);
+      if (value.faviconUrl) {
+        let icon = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+        if (!icon) { icon = document.createElement('link'); icon.rel = 'icon'; document.head.appendChild(icon); }
+        icon.href = value.faviconUrl;
+      }
+    };
+    api.get('/settings').then(response => applyBranding(response.data?.data?.branding)).catch(() => {});
+    const listener = (event: Event) => applyBranding((event as CustomEvent).detail);
+    window.addEventListener('legalitt-branding-updated', listener);
+    return () => window.removeEventListener('legalitt-branding-updated', listener);
+  }, []);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -44,6 +63,10 @@ const MainLayout = () => {
     return <Navigate to="/login" replace />;
   }
 
+  if (!canAccess(location.pathname)) {
+    return <Navigate to="/" replace />;
+  }
+
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex relative overflow-hidden">
@@ -55,6 +78,7 @@ const MainLayout = () => {
         setIsOpen={setIsMobileMenuOpen} 
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={setIsSidebarCollapsed}
+        branding={branding}
       />
       
       <div 

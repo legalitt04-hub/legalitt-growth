@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SafeScreen from '../../components/SafeScreen';
 import { LEGAL_THEME } from '../../constants/legalAdviceTheme';
@@ -8,23 +8,30 @@ import { LawyerCard } from '../../components/legalAdvice/LawyerCard';
 import { RecommendationCard } from '../../components/legalAdvice/RecommendationCard';
 import { PrimaryButton } from '../../components/legalAdvice/PrimaryButton';
 import { SecondaryButton } from '../../components/legalAdvice/SecondaryButton';
-import { reviewAPI } from '../../services/api';
+import { bookingAPI, reviewAPI } from '../../services/api';
 
 export default function ConsultationCompletedScreen({ navigation, route }) {
-  const bookingData = route?.params?.bookingData || {
-    requestId: 'LEG-2026-8492',
-    selectedType: { title: 'Audio Consultation' },
-    selectedMatter: { title: 'Property Law' },
-    lawyer: {
-      id: 'adv_demo_1',
-      name: 'Adv. Rajesh Kumar',
-      title: 'Senior Supreme Court Advocate',
-      experience: '15+ Years Exp.',
-      rating: '4.9',
-      reviewsCount: '340+',
-      avatarUri: 'https://i.pravatar.cc/150?img=11',
-    },
-  };
+  const initialBooking = route?.params?.bookingData || null;
+  const bookingId = route?.params?.bookingId || initialBooking?._id || initialBooking?.id;
+  const [bookingData, setBookingData] = useState(initialBooking);
+  const [loadingBooking, setLoadingBooking] = useState(!!bookingId);
+
+  useEffect(() => {
+    if (!bookingId) {
+      setLoadingBooking(false);
+      return;
+    }
+    let mounted = true;
+    bookingAPI.getBooking(bookingId)
+      .then(({ data }) => {
+        if (mounted && data?.success) setBookingData(data.data);
+      })
+      .catch((error) => {
+        if (mounted) Alert.alert('Unable to Load', error?.response?.data?.message || 'Consultation details could not be loaded.');
+      })
+      .finally(() => mounted && setLoadingBooking(false));
+    return () => { mounted = false; };
+  }, [bookingId]);
 
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
@@ -36,7 +43,7 @@ export default function ConsultationCompletedScreen({ navigation, route }) {
     setSubmitting(true);
     try {
       await reviewAPI.create({
-        advocateId: bookingData.lawyer?._id || bookingData.lawyer?.id,
+        advocateId: bookingData.advocate?._id || bookingData.lawyer?._id || bookingData.lawyer?.id,
         bookingId: bookingData._id || bookingData.id,
         rating,
         comment,
@@ -44,31 +51,29 @@ export default function ConsultationCompletedScreen({ navigation, route }) {
       setSubmittedReview(true);
       Alert.alert('Review Submitted', 'Thank you for rating your advocate!');
     } catch (err) {
-      console.log('Review submit fallback:', err);
-      setSubmittedReview(true);
-      Alert.alert('Review Submitted', 'Thank you for your feedback!');
+      console.log('Review submission failed:', err?.message);
+      Alert.alert('Review Not Submitted', err?.response?.data?.message || 'Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const keyPoints = [
-    'Reviewed title deed chain for property situated at Survey No. 42/A.',
-    'Identified missing NOC from ancestral co-sharer prior to registry execution.',
-    'Confirmed validity of the power of attorney executed in 2021.',
-  ];
+  const deliveredDocuments = bookingData?.advocateDocuments || [];
+  const keyPoints = [bookingData?.issueDescription || bookingData?.issue].filter(Boolean);
+  const recommendations = deliveredDocuments.map((document, index) => document?.name || `Document ${index + 1}`);
 
-  const recommendations = [
-    'File a public notice in local newspaper prior to finalizing property purchase.',
-    'Obtain an encumbrance certificate (EC) for the last 30 years from Sub-Registrar.',
-    'Draft a formal legal notice if seller fails to provide clear NOC within 14 days.',
-  ];
-
-  const handleDownload = () => {
-    Alert.alert(
-      'Download Notes',
-      `Legal_Advice_Summary_${bookingData.requestId}.pdf downloaded successfully to your device storage.`
-    );
+  const handleDownload = async () => {
+    const document = deliveredDocuments[0];
+    const url = typeof document === 'string' ? document : document?.url;
+    if (!url) {
+      Alert.alert('No Document', 'The advocate has not uploaded consultation notes yet.');
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Unable to Open', 'The consultation document link is unavailable.');
+    }
   };
 
   const handleFollowUp = () => {
@@ -78,6 +83,21 @@ export default function ConsultationCompletedScreen({ navigation, route }) {
   const handleBackHome = () => {
     navigation.navigate('ClientMain', { screen: 'Home' });
   };
+
+  if (loadingBooking || !bookingData) {
+    return (
+      <SafeScreen backgroundColor={LEGAL_THEME.colors.white} barStyle="dark-content">
+        <LogoHeader title="Consultation Summary" onBack={() => navigation.goBack()} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          {loadingBooking ? <ActivityIndicator color={LEGAL_THEME.colors.primaryGold} /> : <Text>Consultation details are unavailable.</Text>}
+        </View>
+      </SafeScreen>
+    );
+  }
+
+  const advocate = bookingData.advocate || bookingData.lawyer || {};
+  const advocateUser = advocate.user || advocate;
+  const matterTitle = bookingData.selectedMatter?.title || bookingData.issueCategory || bookingData.serviceType || 'Legal consultation';
 
   return (
     <SafeScreen backgroundColor={LEGAL_THEME.colors.white} barStyle="dark-content">
@@ -95,32 +115,32 @@ export default function ConsultationCompletedScreen({ navigation, route }) {
             </View>
             <Text style={styles.completedTitle}>Consultation Completed</Text>
             <Text style={styles.completedSubtitle}>
-              Your consultation for {bookingData.selectedMatter?.title || 'Property Law'} has concluded successfully.
+              Your consultation for {String(matterTitle).replace(/_/g, ' ')} has concluded successfully.
             </Text>
           </View>
 
           {/* ADVOCATE CARD */}
           <Text style={styles.sectionTitle}>Consulted Advocate</Text>
           <LawyerCard
-            name={bookingData.lawyer?.name}
-            title={bookingData.lawyer?.title}
-            experience={bookingData.lawyer?.experience}
-            rating={bookingData.lawyer?.rating}
-            reviewsCount={bookingData.lawyer?.reviewsCount}
-            avatarUri={bookingData.lawyer?.avatarUri}
+            name={advocateUser.name || 'Assigned Advocate'}
+            title={advocate.title || 'Verified Advocate'}
+            experience={advocate.experience ? `${advocate.experience} Years Exp.` : ''}
+            rating={advocate.rating?.average || 0}
+            reviewsCount={advocate.rating?.count || 0}
+            avatarUri={advocateUser.avatar || null}
             compact
           />
 
           {/* KEY POINTS SUMMARY */}
           <RecommendationCard
-            title="Key Discussion Points"
+            title="Matter Summary"
             items={keyPoints}
             iconName="list-outline"
           />
 
           {/* RECOMMENDATIONS */}
           <RecommendationCard
-            title="Legal Recommendations & Next Steps"
+            title="Delivered Documents"
             items={recommendations}
             iconName="shield-checkmark-outline"
           />
@@ -182,8 +202,8 @@ export default function ConsultationCompletedScreen({ navigation, route }) {
                 <Ionicons name="document-text" size={24} color={LEGAL_THEME.colors.primaryGold} />
               </View>
               <View style={styles.downloadInfo}>
-                <Text style={styles.pdfNameText}>Legal_Advice_Notes_{bookingData.requestId}.pdf</Text>
-                <Text style={styles.pdfMetaText}>Signed by {bookingData.lawyer?.name} • 1.8 MB</Text>
+                <Text style={styles.pdfNameText}>{recommendations[0] || 'Consultation document pending'}</Text>
+                <Text style={styles.pdfMetaText}>{recommendations.length ? `Uploaded by ${advocateUser.name || 'advocate'}` : 'You will be notified after upload'}</Text>
               </View>
             </View>
 

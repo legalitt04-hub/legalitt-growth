@@ -24,37 +24,16 @@ router.post('/create-order', protect, authorize('client'), async (req, res, next
 
     const amountInPaise = Math.round((booking.payment.amount || 499) * 100);
 
-    // If Razorpay keys not configured in environment
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      const mockOrderId = `order_mock_${Date.now()}`;
-      await Booking.findByIdAndUpdate(bookingId, { 'payment.razorpayOrderId': mockOrderId });
-      return res.json({
-        success: true,
-        data: {
-          orderId: mockOrderId,
-          amount: amountInPaise,
-          currency: 'INR',
-          keyId: 'rzp_test_SeC9MGzYmAerqz',
-        },
-      });
+      return next(new AppError('Payment service is not configured.', 503));
     }
 
     let order;
     try {
       order = await razorpay.createOrder(booking.payment.amount || 499, `Booking ${bookingId}`);
     } catch (razorpayErr) {
-      logger.warn(`Razorpay API call failed, using fallback order for booking ${bookingId}: ${razorpayErr.message}`);
-      const mockOrderId = `order_mock_${Date.now()}`;
-      await Booking.findByIdAndUpdate(bookingId, { 'payment.razorpayOrderId': mockOrderId });
-      return res.json({
-        success: true,
-        data: {
-          orderId: mockOrderId,
-          amount: amountInPaise,
-          currency: 'INR',
-          keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_SeC9MGzYmAerqz',
-        },
-      });
+      logger.error(`Razorpay order creation failed for booking ${bookingId}: ${razorpayErr.message}`);
+      return next(new AppError('Payment provider is temporarily unavailable.', 503));
     }
 
     await Booking.findByIdAndUpdate(bookingId, { 'payment.razorpayOrderId': order.id });
@@ -89,25 +68,20 @@ router.post('/verify-payment', protect, authorize('client'), async (req, res, ne
     }
 
     // ── 1. HMAC SHA256 signature verification ───────────────────────────────────
-    const isDevMode = process.env.NODE_ENV !== 'production';
-    const missingKeys = !process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET;
-    const isDevBypass = (isDevMode || missingKeys) && (razorpay_signature === 'dev_bypass' || razorpay_order_id?.startsWith('order_mock'));
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      return next(new AppError('Payment service is not configured.', 503));
+    }
+    const expectedSig = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
 
-    if (!isDevBypass) {
-      const expectedSig = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest('hex');
-
-      if (expectedSig !== razorpay_signature) {
-        logger.warn(`Payment signature mismatch for booking ${bookingId}`, {
-          userId: req.user._id,
-          orderId: razorpay_order_id,
-        });
-        return next(new AppError('Payment verification failed. Invalid signature.', 400));
-      }
-    } else {
-      logger.info(`[DEV] Payment signature bypass for booking ${bookingId}`);
+    if (expectedSig !== razorpay_signature) {
+      logger.warn(`Payment signature mismatch for booking ${bookingId}`, {
+        userId: req.user._id,
+        orderId: razorpay_order_id,
+      });
+      return next(new AppError('Payment verification failed. Invalid signature.', 400));
     }
 
     // ── 2. Confirm booking is owned by this client ───────────────────────────
@@ -115,7 +89,7 @@ router.post('/verify-payment', protect, authorize('client'), async (req, res, ne
     if (!booking) return next(new AppError('Booking not found.', 404));
     if (booking.client.toString() !== req.user._id.toString())
       return next(new AppError('Not authorized.', 403));
-    if (!isDevBypass && booking.payment.razorpayOrderId !== razorpay_order_id)
+    if (booking.payment.razorpayOrderId !== razorpay_order_id)
       return next(new AppError('Order ID mismatch.', 400));
     if (booking.payment.status === 'paid')
       return res.json({ success: true, message: 'Already paid.', data: { booking } });
@@ -164,34 +138,6 @@ router.post('/verify-payment', protect, authorize('client'), async (req, res, ne
     booking.payment.paidAt = new Date();
     await booking.save();
 
-    // ── 6. Update Advocate Wallet ──────────────────────────────────────────
-    if (booking.advocate) {
-      const grossAmount = booking.payment.amount || 499;
-      const commissionRate = 20; // 20% platform fee
-      const platformFee = Math.round(grossAmount * (commissionRate / 100));
-      const netAmount = grossAmount - platformFee;
-
-      await Advocate.findByIdAndUpdate(booking.advocate, {
-        $inc: {
-          'wallet.balance': netAmount,
-          'wallet.totalEarned': netAmount
-        },
-        $push: {
-          'wallet.earningTransactions': {
-            bookingId: booking._id,
-            clientName: req.user.name || 'Client',
-            serviceType: booking.serviceType || 'legal_advice',
-            consultationMode: booking.consultationMode || 'chat',
-            grossAmount,
-            platformFee,
-            netAmount,
-            commissionRate,
-            creditedAt: new Date()
-          }
-        }
-      });
-    }
-
     logger.info(`Payment verified: booking=${bookingId}, payment=${razorpay_payment_id}`);
 
     res.json({
@@ -209,4 +155,3 @@ router.post('/verify-payment', protect, authorize('client'), async (req, res, ne
 });
 
 module.exports = router;
-

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '../components/ui/card';
 import { BarChart3, Download, FileSpreadsheet, FileText, Calendar, Filter } from 'lucide-react';
@@ -8,17 +8,20 @@ import api from '../lib/api';
 export default function Reports() {
   const [reportData, setReportData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState('monthly');
+  const reportDetailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const res = await api.get('/admin/revenue?period=monthly');
+        const res = await api.get(`/admin/revenue?period=${period}`);
         if (res.data?.success && Array.isArray(res.data.data)) {
           const formatted = res.data.data.map((item: any) => {
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const monthName = months[(item._id?.month || 1) - 1];
             return {
-              name: `${monthName}`,
+              name: item.label || `${monthName} ${item._id?.year || ''}`,
+              year: item._id?.year,
               cases: item.count || 0,
               revenue: Math.round((item.revenue || 0) / 1000)
             };
@@ -32,7 +35,13 @@ export default function Reports() {
       }
     };
     fetchReports();
-  }, []);
+  }, [period]);
+
+  const exportCsv = () => {
+    const rows = [['Period', 'Paid bookings', 'Revenue'], ...reportData.map(row => [row.name, row.cases, row.revenue * 1000])];
+    const blob = new Blob([rows.map(row => row.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `legalitt-report-${period}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <motion.div 
@@ -49,11 +58,11 @@ export default function Reports() {
           <p className="text-slate-500 text-sm mt-1">Generate and export detailed platform insights.</p>
         </div>
         <div className="flex gap-2">
-          <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={exportCsv} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             Export CSV
           </button>
-          <button className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={() => window.print()} className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
             <FileText className="w-4 h-4" />
             Export PDF
           </button>
@@ -66,31 +75,10 @@ export default function Reports() {
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Date Range</label>
           <div className="relative">
             <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="Last 30 Days" readOnly className="w-full h-10 pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 cursor-pointer hover:bg-slate-100 transition-colors focus:outline-none" />
+            <select value={period} onChange={e => setPeriod(e.target.value)} className="w-full h-10 pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700"><option value="daily">Last 30 days</option><option value="weekly">Last 12 weeks</option><option value="monthly">Last 12 months</option><option value="yearly">Last 5 years</option></select>
           </div>
         </div>
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Report Type</label>
-          <select className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/50">
-            <option>Financial Performance</option>
-            <option>Case Pipeline Efficiency</option>
-            <option>Advocate Growth metrics</option>
-            <option>AI Draft Utilization</option>
-          </select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Segment</label>
-          <select className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/50">
-            <option>All Services</option>
-            <option>Property Verification</option>
-            <option>Legal Notice</option>
-            <option>FIR Draft</option>
-          </select>
-        </div>
-        <button className="h-10 px-4 bg-slate-800 text-white rounded-md font-medium text-sm hover:bg-slate-900 transition-colors flex items-center gap-2">
-          <Filter className="w-4 h-4" />
-          Generate
-        </button>
+        <div className="flex-1 min-w-[200px]"><label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Report Type</label><div className="h-10 px-3 flex items-center bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700"><Filter className="w-4 h-4 mr-2"/>Paid booking revenue</div></div>
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -113,10 +101,10 @@ export default function Reports() {
           </div>
         </Card>
 
-        <Card className="p-5 bg-white border-slate-200 overflow-hidden flex flex-col">
+        <Card ref={reportDetailRef} className="p-5 bg-white border-slate-200 overflow-hidden flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-slate-900">Generated Report Details</h3>
-            <button className="text-teal-600 text-sm font-medium hover:underline">View Full Screen</button>
+            <button onClick={() => reportDetailRef.current?.requestFullscreen?.()} className="text-teal-600 text-sm font-medium hover:underline">View Full Screen</button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -133,7 +121,7 @@ export default function Reports() {
                 ) : (
                   reportData.map((row) => (
                     <tr key={row.name} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3 font-medium text-slate-900">{row.name} 2026</td>
+                      <td className="p-3 font-medium text-slate-900">{row.name}</td>
                       <td className="p-3 text-slate-600">{row.cases}</td>
                       <td className="p-3 text-right text-slate-600 font-medium font-mono">₹{(row.revenue * 1000).toLocaleString('en-IN')}</td>
                     </tr>

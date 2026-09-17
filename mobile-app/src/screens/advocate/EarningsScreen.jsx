@@ -166,9 +166,6 @@ const EarningsScreen = ({ navigation }) => {
               <Text style={s.heroLabel}>Total Earned</Text>
               <Text style={s.heroAmount}>₹{(balance.totalEarned || 0).toLocaleString('en-IN')}</Text>
             </View>
-            <TouchableOpacity style={s.viewAllBtn}>
-              <Text style={s.viewAllText}>View All</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Mini chart — uses m.earnings from monthlyBreakdown */}
@@ -314,7 +311,7 @@ const EarningsScreen = ({ navigation }) => {
               <View style={s.invoiceMeta}>
                 <View>
                   <Text style={s.metaLabel}>Invoice No</Text>
-                  <Text style={s.metaValue}>INV-2026-{selectedTx?._id?.slice(-4) || '0001'}</Text>
+                  <Text style={s.metaValue}>{selectedTx?._id ? `INV-${selectedTx._id.slice(-8).toUpperCase()}` : 'Not available'}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={s.metaLabel}>Date Issued</Text>
@@ -381,8 +378,6 @@ const s = StyleSheet.create({
   heroIconWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.primary + '18', alignItems: 'center', justifyContent: 'center' },
   heroLabel:  { fontSize: 11, color: '#78716C', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   heroAmount: { fontSize: 26, fontWeight: '900', color: '#1C1917', marginTop: 2 },
-  viewAllBtn: { backgroundColor: '#F5F5F4', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  viewAllText:{ fontSize: 11, fontWeight: '700', color: COLORS.primary },
   heroStats:  { flexDirection: 'row', marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderColor: '#F3F4F6' },
   heroStatItem: { flex: 1, alignItems: 'center' },
   heroStatVal:  { fontSize: 15, fontWeight: '800', color: '#1C1917' },

@@ -13,10 +13,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SHADOWS } from '../../constants/theme';
-import { legalAdviceAPI } from '../../services/api';
+import { legalAdviceAPI, paymentAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import RazorpayCheckout from 'react-native-razorpay';
-import Constants from 'expo-constants';
 import { usePricing } from '../../context/PricingContext';
 
 const PRIMARY_BEIGE = '#C2A98B';
@@ -38,8 +37,6 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
   const [selectedMethod, setSelectedMethod] = useState('upi');
   const [processing, setProcessing] = useState(false);
 
-  const requestId = '#PR-' + Math.floor(100000 + Math.random() * 900000);
-
   const handlePayAndStart = async () => {
     if (!isAuthenticated) {
       Alert.alert(
@@ -55,53 +52,48 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
 
     setProcessing(true);
     try {
-      const RAZORPAY_KEY = Constants.expoConfig?.extra?.RAZORPAY_KEY_ID || 'rzp_test_SeC9MGzYmAerqz';
-      const totalPrice = getPrice('property_research', 2999);
-      const AMOUNT_PAISE = totalPrice * 100;
-
-      let paymentId;
-
-      if (__DEV__) {
-        // Dev bypass
-        paymentId = 'pay_dev_pr_' + Math.random().toString(36).substring(2, 9);
-      } else {
-        // Real Razorpay payment
-        const paymentData = await RazorpayCheckout.open({
-          key: RAZORPAY_KEY,
-          amount: AMOUNT_PAISE,
-          currency: 'INR',
-          name: 'Legalitt Legal Services',
-          description: 'Property Research & Title Verification Report',
-          prefill: { name: user?.name || '', email: user?.email || '' },
-          notes: { requestId, serviceType: 'property_research' },
-          theme: { color: '#C2A98B' },
-        });
-        paymentId = paymentData.razorpay_payment_id;
-      }
-
-      // Save to backend
-      await legalAdviceAPI.createRequest({
+      const bookingResponse = await legalAdviceAPI.createRequest({
         serviceType: 'property_research',
         consultationMode: 'chat',
         issueDescription: `Property Research Request\nAddress: ${propertyData?.propertyAddress || 'N/A'}\nType: ${propertyData?.propertyType || 'N/A'}\nDistrict: ${propertyData?.district || 'N/A'}, ${propertyData?.state || 'N/A'}\nPurpose: ${propertyData?.purpose || 'N/A'}`,
         issueCategory: 'property',
-        amount: totalPrice,
         clientCity: propertyData?.district || '',
-        requestId,
         propertyData,
-        paymentMethod: selectedMethod,
-        razorpayPaymentId: paymentId,
+      });
+      const { bookingId, amount: totalPrice } = bookingResponse.data.data;
+      const orderResponse = await paymentAPI.createOrder(bookingId);
+      const { orderId, amount: amountInPaise, currency, keyId } = orderResponse.data.data;
+
+      const paymentData = await RazorpayCheckout.open({
+        key: keyId,
+        order_id: orderId,
+        amount: amountInPaise,
+        currency: currency || 'INR',
+        name: 'Legalitt Legal Services',
+        description: 'Property Research & Title Verification Report',
+        prefill: { name: user?.name || '', email: user?.email || '' },
+        notes: { bookingId, serviceType: 'property_research' },
+        theme: { color: '#C2A98B' },
+      });
+
+      await legalAdviceAPI.confirmPayment({
+        bookingId,
+        razorpayOrderId: paymentData.razorpay_order_id,
+        razorpayPaymentId: paymentData.razorpay_payment_id,
+        razorpaySignature: paymentData.razorpay_signature,
       });
 
       navigation.replace('PropertyResearchSuccess', {
         paymentStatus: 'SUCCESS',
-        requestId,
+        bookingId,
+        requestId: `PR-${bookingId.slice(-6).toUpperCase()}`,
         propertyData,
         amountPaid: String(totalPrice),
       });
     } catch (err) {
-      if (err?.code === 'PAYMENT_CANCELLED' || err?.description?.includes('cancel')) {
-        return; // User dismissed — not an error
+      if (err?.code === 'PAYMENT_CANCELLED' || err?.description?.toLowerCase?.().includes('cancel')) {
+        Alert.alert('Payment Cancelled', 'Your request is saved as unpaid. You can retry payment.');
+        return;
       }
       console.log('Property research payment error:', err?.message);
       Alert.alert('Payment Failed', err?.message || 'Please try again.');

@@ -85,8 +85,7 @@ const ChatListScreen = ({ navigation }) => {
     const unreadCount = item.unreadCount || 0;
     const lastMsg = item.lastMessage?.content || 'Start chatting';
     const isUnread = unreadCount > 0;
-    const otherIdStr = other._id || 'default';
-    const otherAvatar = other.avatar || `https://i.pravatar.cc/150?u=${otherIdStr}`;
+    const otherAvatar = other.avatar || null;
 
     return (
       <View style={styles.chatRow}>
@@ -105,7 +104,11 @@ const ChatListScreen = ({ navigation }) => {
         >
           <View style={styles.avatarContainer}>
             <View style={styles.chatAvatar}>
-              <Image source={{ uri: otherAvatar }} style={styles.avatarImage} />
+              {otherAvatar ? (
+                <Image source={{ uri: otherAvatar }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>{(other.name || 'U')[0].toUpperCase()}</Text>
+              )}
             </View>
             {other.isOnline && <View style={styles.onlineBadge} />}
           </View>

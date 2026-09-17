@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,13 +14,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
+import { profileAPI } from '../../services/profileAPI';
 
 const SettingsScreen = ({ navigation }) => {
   const [notifications, setNotifications] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
   const [bioLoading, setBioLoading] = useState(false);
 
   const { biometricsEnabled, enableBiometrics, disableBiometrics, user, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    profileAPI.getMe().then(({ data }) => {
+      if (typeof data?.data?.preferences?.notifications === 'boolean') setNotifications(data.data.preferences.notifications);
+    }).catch(() => {});
+  }, [isAuthenticated]);
+
+  const handleNotificationsToggle = async (value) => {
+    const previous = notifications;
+    setNotifications(value);
+    try {
+      await profileAPI.updateProfile({ preferences: { notifications: value } });
+    } catch (err) {
+      setNotifications(previous);
+      Alert.alert('Update Failed', err?.response?.data?.message || 'Could not save notification settings.');
+    }
+  };
 
   const handleBiometricToggle = useCallback(async (value) => {
     if (bioLoading) return;
@@ -125,7 +143,7 @@ const SettingsScreen = ({ navigation }) => {
             'lock-closed-outline',
             'Privacy & Security',
             'Manage password & account security',
-            () => Alert.alert('Coming Soon', 'Advanced security settings will be available in the next update.')
+            () => navigation.navigate('ForgotPassword')
           )}
         </View>
 
@@ -134,13 +152,12 @@ const SettingsScreen = ({ navigation }) => {
           {renderSettingItem('notifications-outline', 'Notifications', 'Manage alerts & updates', null,
             <Switch 
               value={notifications} 
-              onValueChange={setNotifications} 
+              onValueChange={handleNotificationsToggle}
               trackColor={{ false: '#D1D5DB', true: COLORS.primary }}
               thumbColor={'#FFFFFF'}
             />
           )}
-          {renderSettingItem('moon-outline', 'Dark Mode', 'Toggle app theme', () => Alert.alert('Coming Soon', 'Dark mode will be available in the next update!'))}
-          {renderSettingItem('language-outline', 'Language', 'English (US)', () => Alert.alert('Language', 'Currently, only English is supported. More languages coming soon!'))}
+          {renderSettingItem('settings-outline', 'App Permissions', 'Camera, microphone and notifications', () => Linking.openSettings())}
         </View>
 
         <View style={styles.section}>

@@ -40,7 +40,7 @@ const STATUS_CONFIG = {
   open:        { label: 'Open',        color: 'text-blue-700 bg-blue-50 border-blue-200',      icon: <AlertCircle className="w-3 h-3" />,   dot: 'bg-blue-500' },
   pending:     { label: 'Pending',     color: 'text-amber-700 bg-amber-50 border-amber-200',    icon: <Clock className="w-3 h-3" />,         dot: 'bg-amber-500' },
   in_progress: { label: 'In Progress', color: 'text-violet-700 bg-violet-50 border-violet-200', icon: <RotateCcw className="w-3 h-3" />,     dot: 'bg-violet-500' },
-  resolved:    { label: 'Resolved',    color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
+  resolved:    { label: 'Completed',   color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-3 h-3" />, dot: 'bg-emerald-500' },
   closed:      { label: 'Closed',      color: 'text-gray-700 bg-gray-100 border-gray-200',      icon: <XCircle className="w-3 h-3" />,       dot: 'bg-gray-400' },
 };
 

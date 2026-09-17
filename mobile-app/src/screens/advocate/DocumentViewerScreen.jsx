@@ -9,10 +9,14 @@ import {
   Share,
   Alert,
   Modal,
+  Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 // Theme Colors matching "Documents Viewer.pdf"
 const THEME = {
@@ -54,6 +58,9 @@ export default function DocumentViewerScreen({ navigation, route }) {
   const totalPages = Math.max(1, documents.length > 0 ? documents.length : 1);
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [moreModalVisible, setMoreModalVisible] = useState(false);
+  const activeDocument = documents[currentPage - 1] || documentUrl;
+  const activeDocumentUrl = typeof activeDocument === 'object' ? activeDocument?.url : activeDocument;
+  const activeFileName = typeof activeDocument === 'object' && activeDocument?.name ? activeDocument.name : fileName;
 
   // ─── TOOLBAR ACTION HANDLERS ───────────────────────────────────────────────
 
@@ -69,26 +76,41 @@ export default function DocumentViewerScreen({ navigation, route }) {
     setZoomLevel(1.0);
   };
 
-  const handleDownload = () => {
-    if (!hasDocument) {
+  const downloadToCache = async () => {
+    if (!activeDocumentUrl) throw new Error('No document URL is available.');
+    const safeName = String(activeFileName || `document_${Date.now()}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const result = await FileSystem.downloadAsync(activeDocumentUrl, `${FileSystem.cacheDirectory}${Date.now()}_${safeName}`);
+    if (result.status < 200 || result.status >= 300) throw new Error(`Download failed with status ${result.status}`);
+    return result.uri;
+  };
+
+  const handleDownload = async () => {
+    if (!hasDocument || !activeDocumentUrl) {
       Alert.alert('No Document', 'No document file is available to download.');
       return;
     }
-    Alert.alert('Download Document', `Downloading ${fileName}...`, [
-      { text: 'OK' },
-    ]);
+    try {
+      if (Platform.OS === 'web') return Linking.openURL(activeDocumentUrl);
+      const localUri = await downloadToCache();
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(localUri, { dialogTitle: `Save ${activeFileName}` });
+      else Alert.alert('Downloaded', `${activeFileName} was downloaded to the app cache.`);
+    } catch (error) {
+      Alert.alert('Download Failed', error?.message || 'Could not download this document.');
+    }
   };
 
   const handleShare = async () => {
-    if (!hasDocument) {
+    if (!hasDocument || !activeDocumentUrl) {
       Alert.alert('No Document', 'No document file is available to share.');
       return;
     }
     try {
-      await Share.share({
-        title: fileName,
-        message: `Sharing legal document: ${fileName} for ${clientName}`,
-      });
+      if (Platform.OS === 'web') await Share.share({ title: activeFileName, message: activeDocumentUrl });
+      else {
+        const localUri = await downloadToCache();
+        if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(localUri, { dialogTitle: `Share ${activeFileName}` });
+        else await Share.share({ title: activeFileName, message: activeDocumentUrl });
+      }
     } catch (error) {
       console.log('Share error:', error);
     }
@@ -185,12 +207,12 @@ export default function DocumentViewerScreen({ navigation, route }) {
           {viewerState === 'success' && (
             /* ── STATE 1: DOCUMENT AVAILABLE & LOADED ── */
             <View style={[styles.docPreviewWrapper, { height: '100%', width: '100%', flex: 1 }]}>
-              {documentUrl ? (
+              {activeDocumentUrl ? (
                 (() => {
-                  const isPdf = documentUrl.toLowerCase().endsWith('.pdf') || (fileName && fileName.toLowerCase().endsWith('.pdf'));
+                  const isPdf = activeDocumentUrl.toLowerCase().includes('.pdf') || (activeFileName && activeFileName.toLowerCase().endsWith('.pdf'));
                   const viewerUri = isPdf 
-                    ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(documentUrl)}` 
-                    : documentUrl;
+                    ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(activeDocumentUrl)}`
+                    : activeDocumentUrl;
                   
                   return (
                     <WebView
@@ -288,7 +310,7 @@ export default function DocumentViewerScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <Text style={styles.pageNavText}>
-            Page {currentPage} of {totalPages}
+            {totalPages > 1 ? `Document ${currentPage} of ${totalPages}` : 'Document preview'}
           </Text>
 
           <TouchableOpacity
@@ -434,7 +456,7 @@ export default function DocumentViewerScreen({ navigation, route }) {
                 setMoreModalVisible(false);
                 Alert.alert(
                   'Document Details',
-                  `Filename: ${fileName}\nClient: ${clientName}\nCase: ${caseTitle}\nTotal Pages: ${totalPages}`
+                  `Filename: ${activeFileName}\nClient: ${clientName}\nCase: ${caseTitle}\nDocuments in viewer: ${totalPages}`
                 );
               }}
             >

@@ -4,8 +4,11 @@ import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { UserCog, Trash2 } from 'lucide-react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Admins() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [admins, setAdmins] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,10 +82,12 @@ export default function Admins() {
                   <Badge variant="outline" className={adm.isActive !== false ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}>
                     {adm.isActive !== false ? 'Active' : 'Suspended'}
                   </Badge>
-                  <button onClick={() => handleRevoke(adm._id, adm.name)} title="Revoke admin role"
-                    className="p-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {isSuperAdmin && adm._id !== user?._id && (
+                    <button onClick={() => handleRevoke(adm._id, adm.name)} title="Revoke admin role"
+                      className="p-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))

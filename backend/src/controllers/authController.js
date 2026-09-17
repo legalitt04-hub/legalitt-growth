@@ -21,7 +21,7 @@ const signRefreshToken = (id) =>
     expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   });
 
-const sendTokens = async (user, statusCode, res) => {
+const sendTokens = async (user, statusCode, res, extra = {}) => {
   const accessToken = signAccessToken(user._id, user.role);
   const refreshToken = signRefreshToken(user._id);
 
@@ -37,6 +37,7 @@ const sendTokens = async (user, statusCode, res) => {
       user: user.toSafeObject(),
       accessToken,
       refreshToken,
+      ...extra,
     },
   });
 };
@@ -44,41 +45,28 @@ const sendTokens = async (user, statusCode, res) => {
 // ─── Register ─────────────────────────────────────────────────────────────────
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password, phone, role, captchaToken } = req.body;
-
-    // Verify reCAPTCHA token (bypass if matches the secure MOBILE_APP_SECRET or default fallback tokens)
-    const isMobileBypass = 
-      (process.env.MOBILE_APP_SECRET && captchaToken === process.env.MOBILE_APP_SECRET) ||
-      captchaToken === 'legalitt_mobile_app_secure_secret_2026' ||
-      captchaToken === 'mock_captcha_token';
-
-    if (!isMobileBypass) {
-      if (process.env.NODE_ENV === 'production') {
-        try {
-          const axios = require('axios');
-          const verifyUrl = `https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET_KEY}&response=${captchaToken}`;
-          const response = await axios.post(verifyUrl);
-          if (!response.data || !response.data.success) {
-            return next(new AppError('CAPTCHA verification failed. Please try again.', 400));
-          }
-        } catch (err) {
-          return next(new AppError('Error validating CAPTCHA token.', 500));
-        }
-      } else {
-        // In development, accept mock token or simple presence
-        if (!captchaToken) {
-          return next(new AppError('CAPTCHA token required.', 400));
-        }
-      }
+    const { name, email, password, phone, role, registrationToken } = req.body;
+    let registrationProof;
+    try {
+      registrationProof = jwt.verify(registrationToken, process.env.JWT_SECRET);
+    } catch (_) {
+      return next(new AppError('Email verification has expired. Please verify your email again.', 401));
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+    if (registrationProof.purpose !== 'registration' || registrationProof.email !== normalizedEmail) {
+      return next(new AppError('Invalid email verification proof.', 403));
     }
 
     // Prevent privilege escalation
     const safeRole = ['client', 'advocate'].includes(role) ? role : 'client';
+    if (registrationProof.role !== safeRole) {
+      return next(new AppError('Registration role does not match the verified request.', 403));
+    }
 
-    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    const existing = await User.findOne({ email: normalizedEmail });
     if (existing) return next(new AppError('Email already registered.', 400));
 
-    const user = await User.create({ name, email, password, phone, role: safeRole });
+    const user = await User.create({ name, email: normalizedEmail, password, phone, role: safeRole, isEmailVerified: true });
     logger.info(`New user registered: ${user.email} (${user.role})`);
 
     // Send welcome email (non-blocking)
@@ -101,7 +89,7 @@ exports.login = async (req, res, next) => {
 
     const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
     if (!user || !user.password) {
-      return next(new AppError('User not found with this email.', 404));
+      return next(new AppError('Invalid email or password.', 401));
     }
 
     const isMatch = await user.comparePassword(password);
@@ -114,7 +102,7 @@ exports.login = async (req, res, next) => {
           ipAddress: req.ip || req.headers['x-forwarded-for'] || ''
         });
       } catch (e) {}
-      return next(new AppError('Incorrect password.', 401));
+      return next(new AppError('Invalid email or password.', 401));
     }
 
     if (req.body.role === 'admin' && user.role !== 'admin') {
@@ -144,40 +132,39 @@ exports.googleAuth = async (req, res, next) => {
   try {
     const { idToken, accessToken, role } = req.body;
     let payload;
-    if (idToken && idToken.startsWith('mock_')) {
-      const parts = idToken.split(':');
-      payload = {
-        sub: parts[1] || 'mock_google_id_99',
-        email: parts[2] || 'mock-user@legalitt.com',
-        name: parts[3] || 'Mock Google User',
-        picture: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb',
-      };
-    } else if (accessToken) {
-      const axios = require('axios');
-      const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      payload = response.data;
-    } else if (idToken) {
-      const ticket = await googleClient.verifyIdToken({
-        idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-      payload = ticket.getPayload();
-    } else {
-      return next(new AppError('No Google token provided.', 400));
+    try {
+      if (accessToken) {
+        const axios = require('axios');
+        const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        payload = response.data;
+        if (!payload?.email || payload.email_verified === false) {
+          return next(new AppError('Google email is not verified.', 401));
+        }
+      } else if (idToken) {
+        const ticket = await googleClient.verifyIdToken({
+          idToken,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } else {
+        return next(new AppError('No Google token provided.', 400));
+      }
+    } catch (providerError) {
+      logger.warn(`Google authentication rejected: ${providerError.message}`);
+      return next(new AppError('Invalid or expired Google token.', 401));
     }
 
-    const { sub: googleId, email, name, picture } = payload;
+    const { sub: googleId, name, picture } = payload;
+    const email = payload.email?.toLowerCase().trim();
+    if (!googleId || !email) return next(new AppError('Google account information is incomplete.', 401));
 
     const safeRole = ['client', 'advocate'].includes(role) ? role : 'client';
 
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
     if (!user) {
-      if (safeRole === 'advocate') {
-        return next(new AppError('Advocates must register via the standard process first. Email not found.', 403));
-      }
       user = await User.create({
         name,
         email,
@@ -197,7 +184,13 @@ exports.googleAuth = async (req, res, next) => {
 
     if (!user.isActive) return next(new AppError('Account deactivated.', 403));
 
-    await sendTokens(user, 200, res);
+    let requiresAdvocateOnboarding = false;
+    if (user.role === 'advocate') {
+      const Advocate = require('../models/Advocate');
+      requiresAdvocateOnboarding = !(await Advocate.exists({ user: user._id }));
+    }
+
+    await sendTokens(user, 200, res, { requiresAdvocateOnboarding });
   } catch (err) {
     next(err);
   }
@@ -214,6 +207,9 @@ exports.refreshToken = async (req, res, next) => {
     const user = await User.findById(decoded.id).select('+refreshTokens');
     if (!user || !user.refreshTokens.includes(refreshToken)) {
       return next(new AppError('Invalid refresh token.', 401));
+    }
+    if (!user.isActive) {
+      return next(new AppError('Account deactivated.', 403));
     }
 
     // Rotate: remove old, issue new
@@ -252,6 +248,21 @@ exports.logout = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+// ─── Active Sessions Summary ─────────────────────────────────────────────────
+exports.getSessions = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('+refreshTokens lastSeen');
+    if (!user) return next(new AppError('User not found.', 404));
+    res.json({
+      success: true,
+      data: {
+        activeSessions: user.refreshTokens?.length || 0,
+        lastSeen: user.lastSeen,
+      },
+    });
+  } catch (err) { next(err); }
 };
 
 // ─── Get Me ───────────────────────────────────────────────────────────────────
@@ -497,4 +508,3 @@ exports.resetPassword = async (req, res, next) => {
     next(err);
   }
 };
-

@@ -7,10 +7,10 @@ const logger = require('../utils/logger');
 // POST /api/auth/send-otp
 exports.sendOTP = async (req, res, next) => {
   try {
-    const { email } = req.body;
+    const { email, role } = req.body;
     if (!email) return next(new AppError('Email address is required.', 400));
 
-    const result = await otpService.sendOTP(email);
+    const result = await otpService.sendOTP(email, role);
     if (!result.success) return next(new AppError(result.message || 'Failed to send OTP.', 500));
 
     const response = { success: true, message: 'OTP sent successfully.' };
@@ -26,7 +26,7 @@ exports.verifyOTP = async (req, res, next) => {
     const { email, otp, name, role } = req.body;
     if (!email || !otp) return next(new AppError('Email and OTP are required.', 400));
 
-    const result = otpService.verifyOTP(email, otp);
+    const result = await otpService.verifyOTP(email, otp, role);
     if (!result.success) return next(new AppError(result.message, 400));
 
     const safeRole = ['client', 'advocate'].includes(role) ? role : 'client';
@@ -34,10 +34,15 @@ exports.verifyOTP = async (req, res, next) => {
     // Find or create user by email
     let user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // Return success without creating user or issuing tokens yet (register endpoint will do it with password)
+      const registrationToken = jwt.sign(
+        { purpose: 'registration', email: email.trim().toLowerCase(), role: safeRole },
+        process.env.JWT_SECRET,
+        { expiresIn: '10m' }
+      );
       return res.json({
         success: true,
-        message: 'OTP verified successfully. Please proceed to complete registration.'
+        message: 'OTP verified successfully. Please proceed to complete registration.',
+        registrationToken,
       });
     }
 

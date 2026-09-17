@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Star, Trash2, ShieldAlert, EyeOff } from 'lucide-react';
+import { Star, Trash2 } from 'lucide-react';
 import api from '../lib/api';
 
 export default function Reviews() {
@@ -65,14 +65,14 @@ export default function Reviews() {
                   <div className="flex items-center gap-2">
                     <div className="flex text-amber-400">
                       {[...Array(5)].map((_, i) => (
-                        <Star key={i} className={`w-4 h-4 ${i < (rev.rating || 5) ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
+                        <Star key={i} className={`w-4 h-4 ${i < Number(rev.rating || 0) ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
                       ))}
                     </div>
-                    <span className="text-xs font-bold text-slate-900">{rev.rating || 5}.0</span>
+                    <span className="text-xs font-bold text-slate-900">{Number(rev.rating || 0).toFixed(1)}</span>
                   </div>
-                  <p className="text-sm text-slate-800 font-medium font-serif italic">"{rev.comment || rev.reviewText || 'Great consultation service!'}"</p>
+                  <p className="text-sm text-slate-800 font-medium font-serif italic">{rev.comment ? `“${rev.comment}”` : <span className="text-slate-400">No written feedback</span>}</p>
                   <p className="text-xs text-slate-500">
-                    By <strong className="text-slate-700">{rev.user?.name || 'Anonymous Client'}</strong> for Advocate <strong className="text-slate-700">{rev.advocate?.name || 'Advocate'}</strong>
+                    By <strong className="text-slate-700">{rev.client?.name || 'Anonymous Client'}</strong> for Advocate <strong className="text-slate-700">{rev.advocate?.user?.name || 'Advocate'}</strong>
                   </p>
                 </div>
 

@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import {
-  Users, UserCheck, Briefcase, IndianRupee, Clock, AlertCircle,
+  Users, UserCheck, Briefcase, IndianRupee, AlertCircle,
   TrendingUp, TrendingDown, Brain, Activity, RefreshCw,
   CheckCircle2, XCircle, Star, FileText, Wallet, ShieldCheck
 } from 'lucide-react';
@@ -21,12 +21,16 @@ interface Stats {
   completedBookings: number;
   totalRevenue: number;
   monthlyRevenue: number;
+  todayRevenue: number;
+  consultationModes: Array<{ name: string; value: number }>;
   newUsersThisMonth: number;
   userGrowth: number;
   pendingCases: number;
   completedCases: number;
+  inProgressCases: number;
   todaysAppointments: number;
-  averageRating: number;
+  averageRating: number | null;
+  ratingCount: number;
   newBookingsThisMonth: number;
   completionRate: string | number;
 }
@@ -85,16 +89,18 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
   const [revenueData, setRevenueData] = useState<any[]>([]);
-  const [activityData, setActivityData] = useState<any[]>([]);
+  const [activityData, setActivityData] = useState<any>({ registrations: [], bookings: [], recentActivity: [] });
+  const [systemHealthy, setSystemHealthy] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, revenueRes, activityRes] = await Promise.allSettled([
+      const [statsRes, revenueRes, activityRes, healthRes] = await Promise.allSettled([
         api.get('/admin/stats'),
         api.get('/admin/revenue'),
         api.get('/admin/activity'),
+        api.get('/admin/health'),
       ]);
 
       if (statsRes.status === 'fulfilled' && statsRes.value.data?.success) {
@@ -104,8 +110,9 @@ const Dashboard = () => {
         setRevenueData(revenueRes.value.data.data || []);
       }
       if (activityRes.status === 'fulfilled' && activityRes.value.data?.success) {
-        setActivityData(activityRes.value.data.data || []);
+        setActivityData(activityRes.value.data.data || { registrations: [], bookings: [], recentActivity: [] });
       }
+      setSystemHealthy(healthRes.status === 'fulfilled' && healthRes.value.data?.data?.database?.status === 'connected');
       setLastUpdated(new Date());
     } catch (err) {
       console.error('Dashboard fetch error:', err);
@@ -119,37 +126,37 @@ const Dashboard = () => {
   const kpis = stats ? [
     { title: 'Total Users', value: stats.totalClients.toLocaleString(), icon: Users, color: 'bg-indigo-500', growth: stats.userGrowth, growthLabel: `+${stats.newUsersThisMonth} this month` },
     { title: 'Total Advocates', value: stats.totalAdvocates.toLocaleString(), icon: UserCheck, color: 'bg-teal-500', subtitle: `${stats.activeAdvocates} active` },
-    { title: 'Active Cases', value: stats.totalBookings.toLocaleString(), icon: Briefcase, color: 'bg-violet-500', subtitle: `${stats.completedBookings} completed` },
-    { title: "Today's Revenue", value: `₹${(stats.monthlyRevenue / 1000).toFixed(1)}k`, icon: IndianRupee, color: 'bg-emerald-500', subtitle: `₹${(stats.totalRevenue / 1000).toFixed(1)}k total` },
-    { title: 'Pending Payments', value: stats.pendingCases.toLocaleString(), icon: Clock, color: 'bg-amber-500', subtitle: 'Awaiting assignment' },
+    { title: 'Active Cases', value: (stats.pendingCases + (stats.inProgressCases || 0)).toLocaleString(), icon: Briefcase, color: 'bg-violet-500', subtitle: `${stats.completedBookings} completed · ${stats.totalBookings} total` },
+    { title: "Today's Revenue", value: `₹${stats.todayRevenue.toLocaleString()}`, icon: IndianRupee, color: 'bg-emerald-500', subtitle: `₹${(stats.totalRevenue / 1000).toFixed(1)}k total` },
     { title: 'Pending Verification', value: stats.pendingVerifications.toLocaleString(), icon: ShieldCheck, color: 'bg-red-500', subtitle: 'KYC pending' },
     { title: "Today's Consultations", value: stats.todaysAppointments.toLocaleString(), icon: Activity, color: 'bg-cyan-500', subtitle: 'Scheduled today' },
-    { title: 'Avg Rating', value: `${stats.averageRating}/5 ⭐`, icon: Star, color: 'bg-yellow-500', subtitle: 'Platform average' },
+    { title: 'Avg Rating', value: stats.averageRating === null ? 'No ratings' : `${stats.averageRating}/5 ⭐`, icon: Star, color: 'bg-yellow-500', subtitle: `${stats.ratingCount || 0} verified reviews` },
   ] : [];
 
   // Consultation analytics data
-  const consultationData = stats ? [
-    { name: 'Chat', value: Math.round(stats.totalBookings * 0.5) },
-    { name: 'Video', value: Math.round(stats.totalBookings * 0.3) },
-    { name: 'Voice', value: Math.round(stats.totalBookings * 0.2) },
-  ] : [];
+  const consultationData = stats?.consultationModes?.map(item => ({
+    name: item.name.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()),
+    value: item.value,
+  })) || [];
 
   // Case status data
   const caseData = stats ? [
     { name: 'Completed', value: stats.completedCases, fill: '#14b8a6' },
     { name: 'Pending', value: stats.pendingCases, fill: '#f59e0b' },
-    { name: 'Active', value: stats.totalBookings - stats.completedBookings, fill: '#6366f1' },
+    { name: 'In Progress', value: stats.inProgressCases || 0, fill: '#6366f1' },
   ] : [];
 
   // Recent activity timeline items
-  const timelineItems = [
-    { title: 'New legal advice booking created', time: '2 min ago', color: 'bg-teal-500', icon: '📋' },
-    { title: 'Advocate Priya Sharma approved', time: '15 min ago', color: 'bg-emerald-500', icon: '✅' },
-    { title: 'Payment ₹999 confirmed', time: '32 min ago', color: 'bg-indigo-500', icon: '💳' },
-    { title: 'Legal notice submitted by Rahul K.', time: '1 hr ago', color: 'bg-violet-500', icon: '📄' },
-    { title: 'Withdrawal request ₹4,500 pending', time: '2 hr ago', color: 'bg-amber-500', icon: '🏦' },
-    { title: 'New advocate registered from Mumbai', time: '3 hr ago', color: 'bg-blue-500', icon: '👨‍⚖️' },
-  ];
+  const timelineItems = (activityData.recentActivity || []).map((item: any) => ({
+    title: item.title,
+    time: new Date(item.createdAt).toLocaleString('en-IN'),
+    color: item.type === 'registration' ? 'bg-blue-500' : 'bg-teal-500',
+    icon: item.type === 'registration' ? '👤' : '📋',
+  }));
+  const userGrowthData = (activityData.registrations || []).map((item: any) => ({
+    day: `${item._id.day}/${item._id.month}`,
+    users: item.count,
+  }));
 
   if (loading) {
     return (
@@ -179,7 +186,7 @@ const Dashboard = () => {
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-200">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            System Healthy
+            {systemHealthy ? 'System Healthy' : 'System Check Required'}
           </span>
           <button
             onClick={fetchAll}
@@ -210,12 +217,7 @@ const Dashboard = () => {
             <span className="text-sm font-bold text-emerald-600">₹{((stats?.totalRevenue || 0) / 1000).toFixed(1)}k total</span>
           </div>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={revenueData.length ? revenueData : [
-              { month: 'Jan', revenue: 12000 }, { month: 'Feb', revenue: 19000 },
-              { month: 'Mar', revenue: 15000 }, { month: 'Apr', revenue: 25000 },
-              { month: 'May', revenue: 22000 }, { month: 'Jun', revenue: 31000 },
-              { month: 'Jul', revenue: 28000 }, { month: 'Aug', revenue: 35000 },
-            ]}>
+            <AreaChart data={revenueData}>
               <defs>
                 <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
@@ -223,7 +225,7 @@ const Dashboard = () => {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
               <Tooltip formatter={(v: any) => [`₹${Number(v).toLocaleString()}`, 'Revenue']} />
               <Area type="monotone" dataKey="revenue" stroke="#14b8a6" strokeWidth={2.5} fill="url(#revenueGrad)" dot={false} />
@@ -264,12 +266,9 @@ const Dashboard = () => {
           <h3 className="font-bold text-gray-900 mb-1">User Growth</h3>
           <p className="text-xs text-gray-400 mb-4">New registrations by month</p>
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={[
-              { month: 'May', users: 45 }, { month: 'Jun', users: 62 },
-              { month: 'Jul', users: 58 }, { month: 'Aug', users: stats?.newUsersThisMonth || 71 },
-            ]}>
+            <BarChart data={userGrowthData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="day" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip />
               <Bar dataKey="users" fill="#6366f1" radius={[4, 4, 0, 0]} />

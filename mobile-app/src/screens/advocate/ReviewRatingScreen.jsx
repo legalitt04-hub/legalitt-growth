@@ -79,10 +79,12 @@ export default function ReviewRatingScreen({ navigation }) {
 
   const fetchData = async () => {
     try {
+      let resolvedAdvocateId = user?.advocateId;
       // 1. Fetch dashboard stats for aggregated rating metrics
       const statsRes = await api.get('/advocate-dashboard/stats');
       if (statsRes.data?.success && statsRes.data.data) {
         const d = statsRes.data.data;
+        resolvedAdvocateId = d.advocateId || resolvedAdvocateId;
         if (d.ratingStats) {
           setRatingStats(d.ratingStats);
         }
@@ -92,14 +94,15 @@ export default function ReviewRatingScreen({ navigation }) {
       }
 
       // 2. Fetch full list of reviews for this advocate
-      const advocateId = user?.advocateId || user?._id;
+      if (!resolvedAdvocateId) {
+        const profileRes = await api.get('/advocates/me');
+        resolvedAdvocateId = profileRes.data?.data?._id;
+      }
       const reviewsRes = await api.get('/reviews', {
-        params: { advocateId, limit: 50 },
+        params: { advocateId: resolvedAdvocateId, limit: 50 },
       });
       if (reviewsRes.data?.success && Array.isArray(reviewsRes.data.data)) {
-        if (reviewsRes.data.data.length > 0) {
-          setReviews(reviewsRes.data.data);
-        }
+        setReviews(reviewsRes.data.data);
       }
     } catch (err) {
       console.log('Error loading Review and Rating data:', err);
@@ -124,9 +127,9 @@ export default function ReviewRatingScreen({ navigation }) {
     if (activeFilter === 'Newest') {
       list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     } else if (activeFilter === 'Highest Rated') {
-      list.sort((a, b) => (b.rating || 5) - (a.rating || 5));
+      list.sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
     } else if (activeFilter === 'Lowest Rated') {
-      list.sort((a, b) => (a.rating || 5) - (b.rating || 5));
+      list.sort((a, b) => Number(a.rating || 0) - Number(b.rating || 0));
     }
     return list;
   }, [reviews, activeFilter]);
@@ -136,20 +139,20 @@ export default function ReviewRatingScreen({ navigation }) {
   const avgRating = Number(
     ratingStats?.averageRating ||
       (reviews.length > 0
-        ? (reviews.reduce((acc, r) => acc + (r.rating || 5), 0) / reviews.length).toFixed(1)
+        ? (reviews.reduce((acc, r) => acc + Number(r.rating || 0), 0) / reviews.length).toFixed(1)
         : 0)
   );
 
   const positivePercent =
     ratingStats?.positivePercentage ||
     (reviews.length > 0
-      ? Math.round((reviews.filter((r) => (r.rating || 5) >= 4).length / reviews.length) * 100)
+      ? Math.round((reviews.filter((r) => Number(r.rating || 0) >= 4).length / reviews.length) * 100)
       : 0);
 
   const distribution = ratingStats?.distribution || (() => {
     const dist = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     reviews.forEach((r) => {
-      const star = Math.min(5, Math.max(1, Math.round(r.rating || 5)));
+      const star = Math.min(5, Math.max(1, Math.round(Number(r.rating || 0))));
       dist[star] = (dist[star] || 0) + 1;
     });
     return dist;
@@ -246,7 +249,7 @@ export default function ReviewRatingScreen({ navigation }) {
                   {avgRating > 0 ? avgRating.toFixed(1) : '4.8'}
                 </Text>
                 <View style={styles.ratingHeroRight}>
-                  <StarRating rating={avgRating > 0 ? avgRating : 4.8} size={18} />
+              <StarRating rating={avgRating} size={18} />
                   <Text style={styles.basedOnText}>
                     Based on {totalCount} {totalCount === 1 ? 'review' : 'review'}
                   </Text>
@@ -366,23 +369,22 @@ export default function ReviewRatingScreen({ navigation }) {
                         ) : (
                           <View style={styles.avatarFallback}>
                             <Text style={styles.avatarInitial}>
-                              {(rev.client?.name || 'Rahul Sharma')[0].toUpperCase()}
+                              {(rev.client?.name || 'Client')[0].toUpperCase()}
                             </Text>
                           </View>
                         )}
                         <View style={styles.nameCol}>
                           <Text style={styles.clientName} numberOfLines={1}>
-                            {rev.client?.name || 'Rahul Sharma'}
+                            {rev.client?.name || 'Client'}
                           </Text>
-                          <StarRating rating={rev.rating || 5} size={13} />
+                          <StarRating rating={Number(rev.rating || 0)} size={13} />
                         </View>
                       </View>
                     </View>
 
                     {/* Review Body Text */}
                     <Text style={styles.reviewText}>
-                      {rev.comment ||
-                        'Very professional and explained the legal process clearly. The consultation was helpful and easy to understand'}
+                      {rev.comment || 'No written comment provided.'}
                     </Text>
 
                     {/* Card Footer: Consultation type, timestamp, chevron */}

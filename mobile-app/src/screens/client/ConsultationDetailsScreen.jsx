@@ -175,44 +175,31 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
       const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
 
       // Step 3: Open Razorpay checkout
-      let paymentData;
-      if (orderId?.startsWith('order_mock_')) {
-        paymentData = {
-          razorpay_order_id: orderId,
-          razorpay_payment_id: `pay_mock_${Date.now()}`,
-          razorpay_signature: 'mock_signature',
-        };
-      } else {
-        const razorpayOptions = {
-          description: `${selectedType.title} - ${selectedMatter.title}`,
-          image: 'https://res.cloudinary.com/legalitt/image/upload/v1/legalitt-logo.png',
-          currency: currency || 'INR',
-          key: keyId,
-          amount: orderAmount,
-          name: 'Legalitt',
-          order_id: orderId,
-          prefill: {
-            email: email.trim() || userData.email,
-            contact: phone.replace(/\D/g, '').slice(-10),
-            name: fullName.trim(),
-          },
-          theme: { color: '#14B8A6' },
-        };
+      const razorpayOptions = {
+        description: `${selectedType.title} - ${selectedMatter.title}`,
+        image: 'https://res.cloudinary.com/legalitt/image/upload/v1/legalitt-logo.png',
+        currency: currency || 'INR',
+        key: keyId,
+        amount: orderAmount,
+        name: 'Legalitt',
+        order_id: orderId,
+        prefill: {
+          email: email.trim() || userData.email,
+          contact: phone.replace(/\D/g, '').slice(-10),
+          name: fullName.trim(),
+        },
+        theme: { color: '#14B8A6' },
+      };
 
-        try {
-          paymentData = await RazorpayCheckout.open(razorpayOptions);
-        } catch (rzpErr) {
-          if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description === 'Payment cancelled by user.') {
-            Alert.alert('Payment Cancelled', 'You cancelled the payment. Your request was not submitted.');
-            return;
-          }
-          console.warn('Razorpay checkout failed, proceeding with test confirmation:', rzpErr);
-          paymentData = {
-            razorpay_order_id: orderId,
-            razorpay_payment_id: `pay_test_${Date.now()}`,
-            razorpay_signature: 'test_signature',
-          };
+      let paymentData;
+      try {
+        paymentData = await RazorpayCheckout.open(razorpayOptions);
+      } catch (rzpErr) {
+        if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description === 'Payment cancelled by user.') {
+          Alert.alert('Payment Cancelled', 'You cancelled the payment. Your request was not submitted.');
+          return;
         }
+        throw rzpErr;
       }
 
       // Step 4: Confirm payment with backend

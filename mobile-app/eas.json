@@ -27,10 +27,7 @@
       "env": {
         "API_URL": "https://legalitt-growth.onrender.com/api/v1",
         "SOCKET_URL": "https://legalitt-growth.onrender.com",
-        "GOOGLE_WEB_CLIENT_ID": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com",
-        "MOBILE_APP_SECRET": "legalitt_mobile_app_secure_secret_2026",
-        "ZEGO_APP_ID": "954831467",
-        "ZEGO_APP_SIGN": "6aaa4f1b530a5ddff76b050d56a56974101548cf30d10b1c547feb7da07b16ad"
+        "GOOGLE_WEB_CLIENT_ID": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com"
       }
     },
     "production": {
@@ -45,8 +42,7 @@
       "env": {
         "API_URL": "https://legalitt-growth.onrender.com/api/v1",
         "SOCKET_URL": "https://legalitt-growth.onrender.com",
-        "GOOGLE_WEB_CLIENT_ID": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com",
-        "MOBILE_APP_SECRET": "legalitt_mobile_app_secure_secret_2026"
+        "GOOGLE_WEB_CLIENT_ID": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com"
       }
     }
   },

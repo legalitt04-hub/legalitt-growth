@@ -1,5 +1,5 @@
 // screens/client/DocumentForensicTrackScreen.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,199 +7,132 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Linking,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { bookingAPI } from '../../services/api';
 
-// ─── COLOR PALETTE ─────────────────────────────────────────────────────────────
 const PALETTE = {
-  pageBg: '#FFFFFF',
-  cardBg: '#F5EFEB',
-  cardBorder: '#E8DFD5',
-  securityCardBg: '#FAF5EE',
-  securityCardBorder: '#EFE3D3',
-  iconCircleBg: '#E9DFC2',
-  completedGreen: '#16A34A',
-  completedGreenLine: '#16A34A',
-  activeTan: '#8C6E52',
-  pendingBorder: '#D8CDC0',
-  pendingText: '#A89F95',
-  pendingTitle: '#8C8278',
-  inProgressBadgeBg: '#FEF3C7',
-  inProgressBadgeText: '#92400E',
-  inProgressBadgeBorder: '#FDE68A',
-  primaryButton: '#8C6E52',
-  textHeading: '#2A241E',
-  textBody: '#453B32',
-  textMuted: '#766D64',
-  textSubtitle: '#8C8278',
-  dividerColor: '#E0D4C5',
-  lineInactive: '#DCD4C8',
+  pageBg: '#FFFFFF', cardBg: '#F5EFEB', cardBorder: '#E8DFD5', securityCardBg: '#FAF5EE',
+  securityCardBorder: '#EFE3D3', iconCircleBg: '#E9DFC2', completedGreen: '#16A34A',
+  completedGreenLine: '#16A34A', activeTan: '#8C6E52', pendingBorder: '#D8CDC0',
+  pendingText: '#A89F95', pendingTitle: '#8C8278', inProgressBadgeBg: '#FEF3C7',
+  inProgressBadgeText: '#92400E', inProgressBadgeBorder: '#FDE68A', primaryButton: '#8C6E52',
+  textHeading: '#2A241E', textBody: '#453B32', textMuted: '#766D64', textSubtitle: '#8C8278',
+  dividerColor: '#E0D4C5', lineInactive: '#DCD4C8',
 };
 
 export default function DocumentForensicTrackScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { requestId: passedRequestId } = route?.params || {};
+  const bookingId = route?.params?.bookingId;
+  const passedRequestId = route?.params?.requestId;
+  const [booking, setBooking] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const requestId = passedRequestId || 'DF-2026-00245';
+  useEffect(() => {
+    if (!bookingId) {
+      setError('A valid forensic request ID is required.');
+      setLoading(false);
+      return;
+    }
+    let mounted = true;
+    bookingAPI.getBooking(bookingId)
+      .then(({ data }) => {
+        if (mounted && data?.success) setBooking(data.data);
+      })
+      .catch(err => mounted && setError(err?.response?.data?.message || 'Unable to load forensic request.'))
+      .finally(() => mounted && setLoading(false));
+    return () => { mounted = false; };
+  }, [bookingId]);
 
-  const handleContactSupport = () => {
-    Alert.alert(
-      'Contact Support',
-      'Need help with your forensic analysis request? Our legal support team is available 24/7.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call Helpline',
-          onPress: () => Linking.openURL('tel:18001234567').catch(() => {}),
-        },
-      ]
-    );
+  const requestId = passedRequestId || (bookingId ? `#DF-${bookingId.slice(-6).toUpperCase()}` : 'Not available');
+  const documents = [...(booking?.advocateDocuments || []), ...(booking?.adminDocuments || [])];
+  const reportReady = documents.length > 0;
+  const completed = booking?.status === 'completed';
+  const analysisActive = ['confirmed', 'in_progress'].includes(booking?.status);
+  const formatTime = value => value ? new Date(value).toLocaleString('en-IN') : 'Not recorded';
+
+  const openReport = () => {
+    if (!reportReady) {
+      Alert.alert('Report Pending', 'The forensic report has not been uploaded yet.');
+      return;
+    }
+    navigation.navigate('DocumentViewer', {
+      documents,
+      hasDocument: true,
+      fileName: documents[0]?.name || 'Forensic Report',
+      caseTitle: `Forensic Request ${requestId}`,
+    });
   };
 
+  const Step = ({ title, state, subtitle, last = false }) => (
+    <View style={styles.timelineStepRow}>
+      <View style={styles.timelineColLeft}>
+        {state === 'completed' ? (
+          <View style={styles.completedCircle}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View>
+        ) : state === 'active' ? (
+          <View style={styles.activeCircle}><View style={styles.activeInnerDot} /></View>
+        ) : <View style={styles.pendingCircle} />}
+        {!last && <View style={state === 'completed' ? styles.completedVerticalLine : styles.inactiveVerticalLine} />}
+      </View>
+      <View style={styles.timelineColRight}>
+        <Text style={state === 'completed' ? styles.stepTitleCompleted : state === 'active' ? styles.stepTitleActive : styles.stepTitlePending}>{title}</Text>
+        <Text style={state === 'completed' ? styles.stepSubtitle : state === 'active' ? styles.stepSubtitleActive : styles.stepSubtitlePending}>{subtitle}</Text>
+      </View>
+    </View>
+  );
+
+  if (loading || error || !booking) {
+    return (
+      <View style={[styles.container, { backgroundColor: PALETTE.pageBg, alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
+        {loading ? <ActivityIndicator color={PALETTE.primaryButton} /> : <Text style={{ color: PALETTE.textBody, textAlign: 'center' }}>{error || 'Request not found.'}</Text>}
+      </View>
+    );
+  }
+
+  const displayStatus = String(booking.status || 'pending_assignment').replace(/_/g, ' ');
   return (
     <View style={[styles.container, { backgroundColor: PALETTE.pageBg }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-
-      {/* ─── HEADER ──────────────────────────────────────────────────────── */}
       <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 14) }]}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.navigate('ClientMain')}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={PALETTE.textHeading} />
         </TouchableOpacity>
-
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Track Analysis</Text>
-        </View>
-
+        <View style={styles.headerCenter}><Text style={styles.headerTitle}>Track Analysis</Text></View>
         <View style={styles.headerRight} />
       </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, 24) + 30 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ─── REQUEST CARD ─────────────────────────────────────────────── */}
+      <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) + 30 }]} showsVerticalScrollIndicator={false}>
         <View style={styles.requestCard}>
-          <View style={styles.requestIconBox}>
-            <Ionicons name="document-text-outline" size={20} color={PALETTE.primaryButton} />
-          </View>
-
-          <View style={styles.requestTextCol}>
-            <Text style={styles.requestLabel}>Request ID</Text>
-            <Text style={styles.requestValue}>{requestId}</Text>
-          </View>
-
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusBadgeText}>In Progress</Text>
-          </View>
+          <View style={styles.requestIconBox}><Ionicons name="document-text-outline" size={20} color={PALETTE.primaryButton} /></View>
+          <View style={styles.requestTextCol}><Text style={styles.requestLabel}>Request ID</Text><Text style={styles.requestValue}>{requestId}</Text></View>
+          <View style={styles.statusBadge}><Text style={styles.statusBadgeText}>{displayStatus}</Text></View>
         </View>
-
-        {/* ─── ANALYSIS PROGRESS (VERTICAL TIMELINE) ────────────────────── */}
         <Text style={styles.timelineHeading}>Analysis Progress</Text>
-
         <View style={styles.timelineCard}>
-          {/* STEP 1: Payment Received (Completed) */}
-          <View style={styles.timelineStepRow}>
-            <View style={styles.timelineColLeft}>
-              <View style={styles.completedCircle}>
-                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-              </View>
-              <View style={styles.completedVerticalLine} />
-            </View>
-            <View style={styles.timelineColRight}>
-              <Text style={styles.stepTitleCompleted}>Payment Received</Text>
-              <Text style={styles.stepSubtitle}>23 May, 2026, 10:30 AM</Text>
-            </View>
-          </View>
-
-          {/* STEP 2: Document Uploaded (Completed) */}
-          <View style={styles.timelineStepRow}>
-            <View style={styles.timelineColLeft}>
-              <View style={styles.completedCircle}>
-                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-              </View>
-              <View style={styles.completedVerticalLine} />
-            </View>
-            <View style={styles.timelineColRight}>
-              <Text style={styles.stepTitleCompleted}>Document Uploaded</Text>
-              <Text style={styles.stepSubtitle}>23 May, 2026, 10:30 AM</Text>
-            </View>
-          </View>
-
-          {/* STEP 3: Forensic Analysis (Active / In Progress) */}
-          <TouchableOpacity
-            style={styles.timelineStepRow}
-            onPress={() => navigation.navigate('DocumentForensicAnalysis')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.timelineColLeft}>
-              <View style={styles.activeCircle}>
-                <View style={styles.activeInnerDot} />
-              </View>
-              <View style={styles.inactiveVerticalLine} />
-            </View>
-            <View style={styles.timelineColRight}>
-              <Text style={styles.stepTitleActive}>Forensic Analysis</Text>
-              <Text style={styles.stepSubtitleActive}>In Progress (Tap to View Checks)</Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* STEP 4: Expert Review (Pending) */}
-          <View style={styles.timelineStepRow}>
-            <View style={styles.timelineColLeft}>
-              <View style={styles.pendingCircle} />
-              <View style={styles.inactiveVerticalLine} />
-            </View>
-            <View style={styles.timelineColRight}>
-              <Text style={styles.stepTitlePending}>Expert Review</Text>
-              <Text style={styles.stepSubtitlePending}>Pending</Text>
-            </View>
-          </View>
-
-          {/* STEP 5: Report Ready (Pending - Last item without line) */}
-          <View style={styles.timelineStepRow}>
-            <View style={styles.timelineColLeft}>
-              <View style={styles.pendingCircle} />
-            </View>
-            <View style={styles.timelineColRight}>
-              <Text style={styles.stepTitlePending}>Report Ready</Text>
-              <Text style={styles.stepSubtitlePending}>Pending</Text>
-            </View>
-          </View>
+          <Step title="Payment Received" state={booking.payment?.status === 'paid' ? 'completed' : 'pending'} subtitle={formatTime(booking.payment?.paidAt)} />
+          <Step title="Document Uploaded" state={(booking.documents || []).length ? 'completed' : 'pending'} subtitle={(booking.documents || []).length ? `${booking.documents.length} document(s)` : 'Pending'} />
+          <Step title="Forensic Analysis" state={completed ? 'completed' : analysisActive ? 'active' : 'pending'} subtitle={completed ? 'Completed' : analysisActive ? 'In progress' : 'Awaiting assignment'} />
+          <Step title="Expert Review" state={completed ? 'completed' : booking.status === 'in_progress' ? 'active' : 'pending'} subtitle={completed ? 'Completed' : booking.status === 'in_progress' ? 'In progress' : 'Pending'} />
+          <Step title="Report Ready" state={reportReady ? 'completed' : 'pending'} subtitle={reportReady ? `${documents.length} report document(s)` : 'Pending'} last />
         </View>
-
-        {/* ─── CONTACT SUPPORT BUTTON ───────────────────────────────────── */}
-        <TouchableOpacity
-          style={styles.contactSupportBtn}
-          onPress={handleContactSupport}
-          activeOpacity={0.8}
-        >
+        {reportReady && (
+          <TouchableOpacity style={styles.contactSupportBtn} onPress={openReport} activeOpacity={0.8}>
+            <Ionicons name="document-text-outline" size={18} color={PALETTE.primaryButton} style={styles.supportIcon} />
+            <Text style={styles.contactSupportBtnText}>View Forensic Report</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.contactSupportBtn} onPress={() => navigation.navigate('Support')} activeOpacity={0.8}>
           <Ionicons name="headset-outline" size={18} color={PALETTE.primaryButton} style={styles.supportIcon} />
           <Text style={styles.contactSupportBtnText}>Contact Support</Text>
         </TouchableOpacity>
-
-        {/* ─── SECURITY CARD ────────────────────────────────────────────── */}
         <View style={styles.securityCard}>
-          <View style={styles.securityIconBox}>
-            <Ionicons name="lock-closed" size={18} color={PALETTE.primaryButton} />
-          </View>
-
+          <View style={styles.securityIconBox}><Ionicons name="lock-closed" size={18} color={PALETTE.primaryButton} /></View>
           <View style={styles.securityTextCol}>
-            <Text style={styles.securityHeading}>100% Confidential & Secure</Text>
-            <Text style={styles.securityDesc}>
-              Your documents are encrypted and{'\n'}accessible only to authorized experts.
-            </Text>
+            <Text style={styles.securityHeading}>Confidential & Secure</Text>
+            <Text style={styles.securityDesc}>Your documents are available only to authorized participants.</Text>
           </View>
         </View>
       </ScrollView>

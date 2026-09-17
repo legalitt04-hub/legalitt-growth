@@ -4,6 +4,7 @@ const Booking = require('../models/Booking');
 const Review = require('../models/Review');
 const Settings = require('../models/Settings');
 const Case = require('../models/Case');
+const Withdrawal = require('../models/Withdrawal');
 
 // ─── Dashboard Stats ───────────────────────────────────────────────────────────
 exports.getDashboardStats = async (req, res, next) => {
@@ -11,7 +12,6 @@ exports.getDashboardStats = async (req, res, next) => {
     const now = new Date();
     const startOfMonth   = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const endOfLastMonth   = new Date(now.getFullYear(), now.getMonth(), 0);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
@@ -19,29 +19,37 @@ exports.getDashboardStats = async (req, res, next) => {
       totalClients, totalAdvocates, pendingVerifications,
       totalBookings, completedBookings, revenueData,
       newUsersThisMonth, newUsersLastMonth, newBookingsThisMonth,
-      pendingCases, completedCases, activeAdvocates,
-      todaysAppointments, averageRatingData, monthlyRevenueData
+      pendingCases, completedCases, inProgressCases, activeAdvocates,
+      todaysAppointments, averageRatingData, monthlyRevenueData,
+      todayRevenueData, consultationModeData, pendingWithdrawals
     ] = await Promise.all([
-      User.countDocuments({ role: 'client', isActive: true }),
-      Advocate.countDocuments({ isVerified: true }),
-      Advocate.countDocuments({ verificationStatus: 'pending' }),
+      User.countDocuments({ role: 'client' }),
+      Advocate.countDocuments(),
+      Advocate.countDocuments({ verificationStatus: { $in: ['pending', 'under_review'] } }),
       Booking.countDocuments(),
       Booking.countDocuments({ status: 'completed' }),
       Booking.aggregate([{ $match: { 'payment.status': 'paid' } }, { $group: { _id: null, total: { $sum: '$payment.amount' } } }]),
-      User.countDocuments({ createdAt: { $gte: startOfMonth } }),
-      User.countDocuments({ createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth } }),
+      User.countDocuments({ role: 'client', createdAt: { $gte: startOfMonth } }),
+      User.countDocuments({ role: 'client', createdAt: { $gte: startOfLastMonth, $lt: startOfMonth } }),
       Booking.countDocuments({ createdAt: { $gte: startOfMonth } }),
       
       // New Queries for the updated Dashboard
-      Case.countDocuments({ status: 'pending' }),
-      Case.countDocuments({ status: 'completed' }),
-      User.countDocuments({ role: 'advocate', isActive: true }),
+      Booking.countDocuments({ status: { $in: ['pending_assignment', 'pending'] } }),
+      Booking.countDocuments({ status: 'completed' }),
+      Booking.countDocuments({ status: { $in: ['confirmed', 'in_progress', 'rescheduled'] } }),
+      Advocate.countDocuments({ verificationStatus: 'approved', isVerified: true }),
       Booking.countDocuments({ date: { $gte: startOfToday, $lte: endOfToday } }),
-      Review.aggregate([{ $group: { _id: null, avg: { $avg: '$rating' } } }]),
+      Review.aggregate([{ $match: { isVerified: true } }, { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } }]),
       Booking.aggregate([
         { $match: { 'payment.status': 'paid', createdAt: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: '$payment.amount' } } }
-      ])
+      ]),
+      Booking.aggregate([
+        { $match: { 'payment.status': 'paid', 'payment.paidAt': { $gte: startOfToday, $lte: endOfToday } } },
+        { $group: { _id: null, total: { $sum: '$payment.amount' } } }
+      ]),
+      Booking.aggregate([{ $group: { _id: '$consultationMode', value: { $sum: 1 } } }]),
+      Withdrawal.countDocuments({ status: 'pending' })
     ]);
 
     const totalRevenue = revenueData[0]?.total || 0;
@@ -49,7 +57,7 @@ exports.getDashboardStats = async (req, res, next) => {
     const averageRating = averageRatingData[0]?.avg || 0;
     const userGrowth = newUsersLastMonth > 0
       ? (((newUsersThisMonth - newUsersLastMonth) / newUsersLastMonth) * 100).toFixed(1)
-      : 100;
+      : (newUsersThisMonth > 0 ? 100 : 0);
 
     res.json({
       success: true,
@@ -64,12 +72,16 @@ exports.getDashboardStats = async (req, res, next) => {
         // New fields
         pendingCases,
         completedCases,
+        inProgressCases,
         activeAdvocates,
         pendingKYC: pendingVerifications, 
         todaysAppointments,
         monthlyRevenue,
-        pendingWithdrawals: 0, 
-        averageRating: parseFloat(averageRating.toFixed(1))
+        todayRevenue: todayRevenueData[0]?.total || 0,
+        consultationModes: consultationModeData.map(item => ({ name: item._id || 'chat', value: item.value })),
+        pendingWithdrawals,
+        averageRating: averageRatingData[0]?.count ? parseFloat(averageRating.toFixed(1)) : null,
+        ratingCount: averageRatingData[0]?.count || 0,
       },
     });
   } catch (err) { next(err); }
@@ -102,7 +114,15 @@ exports.getRevenueAnalytics = async (req, res, next) => {
       { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
     ]);
 
-    res.json({ success: true, data: revenueByPeriod });
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const formatted = revenueByPeriod.map(item => ({
+      ...item,
+      label: period === 'monthly' ? `${monthNames[(item._id.month || 1) - 1]} ${item._id.year}`
+        : period === 'yearly' ? String(item._id.year)
+        : period === 'weekly' ? `W${item._id.week} ${item._id.year}`
+        : `${item._id.day}/${item._id.month}`,
+    }));
+    res.json({ success: true, data: formatted });
   } catch (err) { next(err); }
 };
 
@@ -110,7 +130,7 @@ exports.getRevenueAnalytics = async (req, res, next) => {
 exports.getActivityGraph = async (req, res, next) => {
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [registrations, bookings] = await Promise.all([
+    const [registrations, bookings, recentUsers, recentBookings] = await Promise.all([
       User.aggregate([
         { $match: { createdAt: { $gte: thirtyDaysAgo } } },
         { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } }, count: { $sum: 1 } } },
@@ -121,8 +141,14 @@ exports.getActivityGraph = async (req, res, next) => {
         { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } }, count: { $sum: 1 } } },
         { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
       ]),
+      User.find().select('name role createdAt').sort({ createdAt: -1 }).limit(5).lean(),
+      Booking.find().select('serviceType payment.amount payment.status createdAt status').populate('client', 'name').sort({ createdAt: -1 }).limit(5).lean(),
     ]);
-    res.json({ success: true, data: { registrations, bookings } });
+    const recentActivity = [
+      ...recentUsers.map(user => ({ type: 'registration', title: `${user.name} registered as ${user.role}`, createdAt: user.createdAt })),
+      ...recentBookings.map(booking => ({ type: 'booking', title: `${booking.client?.name || 'Client'} created a ${booking.serviceType?.replace(/_/g, ' ')} booking`, createdAt: booking.createdAt })),
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 8);
+    res.json({ success: true, data: { registrations, bookings, recentActivity } });
   } catch (err) { next(err); }
 };
 
@@ -299,6 +325,12 @@ exports.updateUserRole = async (req, res, next) => {
 const fs = require('fs');
 const csvParser = require('csv-parser');
 const xlsx = require('xlsx');
+const safeUnlink = (filePath) => {
+  if (!filePath) return;
+  try { fs.unlinkSync(filePath); } catch (error) {
+    if (error.code !== 'ENOENT') console.error('Temporary upload cleanup failed:', error.message);
+  }
+};
 
 exports.bulkUploadAdvocates = async (req, res, next) => {
   try {
@@ -308,12 +340,23 @@ exports.bulkUploadAdvocates = async (req, res, next) => {
 
     let results = [];
     const ext = req.file.originalname.split('.').pop().toLowerCase();
+    const headerAliases = {
+      name: 'name', email: 'email', phone: 'phone', password: 'password',
+      barcouncilnumber: 'barCouncilNumber', barcouncilid: 'barCouncilNumber',
+      specializations: 'specializations', specialization: 'specializations',
+      experience: 'experience', consultationfee: 'consultationFee', fee: 'consultationFee',
+      city: 'city', state: 'state', latitude: 'latitude', lat: 'latitude',
+      longitude: 'longitude', lng: 'longitude', long: 'longitude',
+      verificationstatus: 'verificationStatus', status: 'verificationStatus',
+    };
+    const normalizeHeader = (header) => headerAliases[String(header || '').replace(/^\uFEFF/, '').trim().replace(/[\s_-]+/g, '').toLowerCase()] || String(header || '').trim();
+    const normalizeRow = (row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizeHeader(key), value]));
 
     try {
       if (ext === 'csv') {
         await new Promise((resolve, reject) => {
           fs.createReadStream(req.file.path)
-            .pipe(csvParser())
+            .pipe(csvParser({ mapHeaders: ({ header }) => normalizeHeader(header) }))
             .on('data', (data) => results.push(data))
             .on('end', resolve)
             .on('error', reject);
@@ -321,73 +364,91 @@ exports.bulkUploadAdvocates = async (req, res, next) => {
       } else if (ext === 'xls' || ext === 'xlsx') {
         const workbook = xlsx.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
-        results = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        results = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' }).map(normalizeRow);
       } else {
-        fs.unlinkSync(req.file.path);
+        safeUnlink(req.file.path);
         return res.status(400).json({ success: false, message: 'Unsupported file format. Please upload CSV or Excel file.' });
       }
     } catch (parseErr) {
-      fs.unlinkSync(req.file.path);
+      safeUnlink(req.file.path);
       return res.status(400).json({ success: false, message: 'Failed to parse file: ' + parseErr.message });
+    }
+
+    if (results.length === 0) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ success: false, message: 'The uploaded file has no data rows.' });
+    }
+    if (results.length > 1000) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ success: false, message: 'A bulk upload can contain at most 1000 advocates.' });
     }
 
     let successCount = 0;
     let skippedCount = 0;
     const errors = [];
 
-        for (const row of results) {
-          try {
-            // Check if user or advocate already exists
-            const existingUser = await User.findOne({ email: row.email });
-            const existingAdvocate = await Advocate.findOne({ barCouncilNumber: row.barCouncilNumber });
+    const validSpecializations = new Set([
+      'Criminal Law', 'Civil Law', 'Family Law', 'Property Law', 'Corporate Law',
+      'Labour Law', 'Constitutional Law', 'Tax Law', 'Consumer Law', 'Cyber Law',
+      'Intellectual Property', 'Banking Law', 'Environmental Law', 'Human Rights', 'Immigration Law',
+    ]);
 
-            if (existingUser || existingAdvocate) {
-              skippedCount++;
-              errors.push(`Row skipped: Email ${row.email} or Bar Council ${row.barCouncilNumber} already exists.`);
-              continue;
-            }
+    for (let index = 0; index < results.length; index += 1) {
+      const row = results[index];
+      let createdUser = null;
+      try {
+        const rowNumber = index + 2;
+        const email = String(row.email || '').trim().toLowerCase();
+        const required = ['name', 'email', 'password', 'barCouncilNumber', 'specializations', 'experience', 'consultationFee', 'city', 'latitude', 'longitude'];
+        const missing = required.filter(field => row[field] === undefined || String(row[field]).trim() === '');
+        if (missing.length) throw new Error(`Row ${rowNumber}: missing ${missing.join(', ')}`);
+        if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error(`Row ${rowNumber}: invalid email address`);
+        if (String(row.password).length < 8) throw new Error(`Row ${rowNumber}: password must contain at least 8 characters`);
 
-            // Create User
-            const user = await User.create({
-              name: row.name,
-              email: row.email,
-              phone: row.phone || undefined,
-              password: 'Legalitt@123',
-              role: 'advocate',
-              isActive: true,
-              isEmailVerified: true
-            });
+        const experience = Number(row.experience);
+        const consultationFee = Number(row.consultationFee);
+        const latitude = Number(row.latitude);
+        const longitude = Number(row.longitude);
+        if (!Number.isFinite(experience) || experience < 0) throw new Error(`Row ${rowNumber}: experience must be zero or greater`);
+        if (!Number.isFinite(consultationFee) || consultationFee < 0) throw new Error(`Row ${rowNumber}: consultationFee must be zero or greater`);
+        if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error(`Row ${rowNumber}: invalid latitude/longitude`);
 
-            // Create Advocate Profile
-            let specializations = [];
-            if (row.specializations) {
-               specializations = row.specializations.split(',').map(s => s.trim()).filter(s => s);
-            }
+        const specializationLookup = new Map([...validSpecializations].map(value => [value.toLowerCase(), value]));
+        const specializations = String(row.specializations).split(',').map(value => specializationLookup.get(value.trim().toLowerCase()) || value.trim()).filter(Boolean);
+        const invalidSpecializations = specializations.filter(value => !validSpecializations.has(value));
+        if (!specializations.length || invalidSpecializations.length) throw new Error(`Row ${rowNumber}: invalid specializations${invalidSpecializations.length ? ` (${invalidSpecializations.join(', ')})` : ''}`);
 
-            await Advocate.create({
-              user: user._id,
-              barCouncilNumber: row.barCouncilNumber,
-              experience: parseInt(row.experience) || 0,
-              consultationFee: parseInt(row.consultationFee) || 1000,
-              specializations: specializations,
-              location: {
-                type: 'Point',
-                coordinates: [72.8777, 19.0760], // default to mumbai
-                address: { city: row.city || 'Mumbai' }
-              },
-              isVerified: true,
-              verificationStatus: 'approved'
-            });
+        const requestedStatus = String(row.verificationStatus || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+        const verificationStatus = ['pending', 'under_review', 'approved'].includes(requestedStatus)
+          ? requestedStatus
+          : 'pending';
+        const [existingUser, existingAdvocate] = await Promise.all([
+          User.findOne({ email }),
+          Advocate.findOne({ barCouncilNumber: String(row.barCouncilNumber).trim() }),
+        ]);
+        if (existingUser || existingAdvocate) throw new Error(`Row ${rowNumber}: email or Bar Council number already exists`);
 
-            successCount++;
-          } catch (err) {
-            skippedCount++;
-            errors.push(`Error processing ${row.email}: ${err.message}`);
-          }
-        }
+        createdUser = await User.create({
+          name: String(row.name).trim(), email, phone: row.phone ? String(row.phone).trim() : undefined,
+          password: String(row.password), role: 'advocate', isActive: true, isEmailVerified: true,
+        });
+        await Advocate.create({
+          user: createdUser._id,
+          barCouncilNumber: String(row.barCouncilNumber).trim(),
+          experience, consultationFee, specializations,
+          location: { type: 'Point', coordinates: [longitude, latitude], address: { city: String(row.city).trim(), state: String(row.state || '').trim() } },
+          isVerified: verificationStatus === 'approved', verificationStatus,
+        });
+        successCount += 1;
+      } catch (err) {
+        if (createdUser?._id) await User.findByIdAndDelete(createdUser._id).catch(() => {});
+        skippedCount += 1;
+        errors.push(err.message);
+      }
+    }
 
     // Clean up file
-    fs.unlinkSync(req.file.path);
+    safeUnlink(req.file.path);
 
     res.json({
       success: true,
@@ -395,7 +456,7 @@ exports.bulkUploadAdvocates = async (req, res, next) => {
       data: { successCount, skippedCount, errors }
     });
   } catch (err) {
-    if (req.file) fs.unlinkSync(req.file.path);
+    safeUnlink(req.file?.path);
     next(err);
   }
 };
@@ -703,7 +764,8 @@ exports.updateSettings = async (req, res, next) => {
   try {
     const allowedUpdates = [
       'commissionRate', 'minFee', 'maxAdvanceBookingDays',
-      'features', 'maintenanceMode', 'announcement', 'postConsultationBufferHours'
+      'features', 'maintenanceMode', 'announcement', 'postConsultationBufferHours', 'branding',
+      'sessionDuration', 'sessionExtensionEnabled', 'maxExtensionHours'
     ];
     const updateData = {};
     for (const key of allowedUpdates) {
@@ -715,14 +777,45 @@ exports.updateSettings = async (req, res, next) => {
       { $set: updateData },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+    require('../middlewares/platformSettings').invalidatePlatformSettings();
     res.json({ success: true, data: settings, message: 'Settings updated successfully' });
+  } catch (err) { next(err); }
+};
+
+exports.uploadBrandAsset = async (req, res, next) => {
+  try {
+    const type = req.body.type;
+    if (!['logo', 'favicon'].includes(type)) return next(new (require('../middlewares/errorHandler').AppError)('Asset type must be logo or favicon.', 400));
+    if (!req.file || !req.file.mimetype?.startsWith('image/')) return next(new (require('../middlewares/errorHandler').AppError)('Please upload a valid image file.', 400));
+    let assetUrl;
+    const cloudinaryConfigured = process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET;
+    if (cloudinaryConfigured) {
+      const cloudinary = require('cloudinary').v2;
+      cloudinary.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET });
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream({
+          folder: 'legalitt/branding', resource_type: 'image',
+          transformation: type === 'favicon' ? [{ width: 128, height: 128, crop: 'fit' }] : [{ width: 600, height: 240, crop: 'fit' }],
+        }, (error, uploaded) => error ? reject(error) : resolve(uploaded));
+        stream.end(req.file.buffer);
+      });
+      assetUrl = result.secure_url;
+    } else {
+      // Branding assets are deliberately capped at 1 MB by the route. A data URL
+      // keeps uploads functional in deployments where Cloudinary is not configured.
+      assetUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    }
+    const field = type === 'favicon' ? 'branding.faviconUrl' : 'branding.logoUrl';
+    const settings = await Settings.findOneAndUpdate({ singletonId: 'global' }, { $set: { [field]: assetUrl } }, { new: true, upsert: true, setDefaultsOnInsert: true });
+    require('../middlewares/platformSettings').invalidatePlatformSettings();
+    res.json({ success: true, data: { url: assetUrl, branding: settings.branding } });
   } catch (err) { next(err); }
 };
 
 exports.getPublicSettings = async (req, res, next) => {
   try {
     let settings = await Settings.findOne({ singletonId: 'global' })
-      .select('maintenanceMode announcement features minFee maxAdvanceBookingDays commissionRate postConsultationBufferHours')
+      .select('maintenanceMode announcement features minFee maxAdvanceBookingDays commissionRate postConsultationBufferHours branding')
       .lean();
     if (!settings) {
       const s = await Settings.create({});
@@ -734,6 +827,7 @@ exports.getPublicSettings = async (req, res, next) => {
         maxAdvanceBookingDays: s.maxAdvanceBookingDays,
         commissionRate: s.commissionRate,
         postConsultationBufferHours: s.postConsultationBufferHours,
+        branding: s.branding,
       };
     }
     res.json({ success: true, data: settings });
@@ -743,7 +837,9 @@ exports.getPublicSettings = async (req, res, next) => {
 // ─── Enhanced User Management ─────────────────────────────────────────────────
 exports.createUser = async (req, res, next) => {
   try {
-    const { name, email, phone, password, role = 'client' } = req.body;
+    const { name, email, phone, password } = req.body;
+    const requestedRole = req.body.role || 'client';
+    const role = ['super_admin', 'superadmin'].includes(req.user?.role) ? requestedRole : 'client';
     if (!name || !email || !password) return next(new (require('../middlewares/errorHandler').AppError)('Name, email, password required.', 400));
     const exists = await User.findOne({ email: email.toLowerCase() });
     if (exists) return next(new (require('../middlewares/errorHandler').AppError)('Email already registered.', 409));
@@ -824,6 +920,7 @@ exports.resetUserPassword = async (req, res, next) => {
 
 // ─── Enhanced Advocate Management ────────────────────────────────────────────
 exports.createAdvocate = async (req, res, next) => {
+  let createdUser = null;
   try {
     const {
       name, email, phone, password,
@@ -832,17 +929,24 @@ exports.createAdvocate = async (req, res, next) => {
       consultationFee, experience, lat, lng,
     } = req.body;
 
-    if (!name || !email || !password)
-      return next(new (require('../middlewares/errorHandler').AppError)('Name, email, password required.', 400));
+    if (!name || !email || !password || !(barCouncilNumber || barCouncilId) || !city || consultationFee === undefined || experience === undefined || lat === undefined || lng === undefined)
+      return next(new (require('../middlewares/errorHandler').AppError)('Name, email, password, bar council number, city, coordinates, consultation fee, and experience are required.', 400));
 
-    const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists)
-      return next(new (require('../middlewares/errorHandler').AppError)('Email already registered.', 409));
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+    const fee = Number(consultationFee);
+    const experienceYears = Number(experience);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)
+      return next(new (require('../middlewares/errorHandler').AppError)('Valid latitude and longitude are required.', 400));
+    if (!Number.isFinite(fee) || fee < 0 || !Number.isFinite(experienceYears) || experienceYears < 0)
+      return next(new (require('../middlewares/errorHandler').AppError)('Consultation fee and experience must be zero or greater.', 400));
 
-    const user = await User.create({
-      name, email: email.toLowerCase(), phone, password,
-      role: 'advocate', isVerified: true,
-    });
+    const [existingUser, existingBarCouncil] = await Promise.all([
+      User.findOne({ email: email.toLowerCase() }),
+      Advocate.findOne({ barCouncilNumber: barCouncilNumber || barCouncilId }),
+    ]);
+    if (existingUser || existingBarCouncil)
+      return next(new (require('../middlewares/errorHandler').AppError)('Email or Bar Council number already registered.', 409));
 
     const AdvocateModel = require('../models/Advocate');
 
@@ -869,27 +973,39 @@ exports.createAdvocate = async (req, res, next) => {
       specs = raw.map(s => {
         if (VALID_SPECS.includes(s)) return s;
         const mapped = SPEC_MAP[s.toLowerCase()];
-        return mapped || 'Civil Law'; // Default fallback
+        return mapped || null;
       });
+      specs = specs.filter(Boolean);
     }
+
+    if (!specs.length) return next(new (require('../middlewares/errorHandler').AppError)('At least one valid specialization is required.', 400));
+
+    const user = await User.create({
+      name, email: email.toLowerCase(), phone, password,
+      role: 'advocate', isVerified: true,
+    });
+    createdUser = user;
 
     const advocate = await AdvocateModel.create({
       user: user._id,
-      barCouncilNumber: barCouncilNumber || barCouncilId || `ADM-${Date.now()}`,
-      specializations: specs.length > 0 ? specs : ['Civil Law'],
+      barCouncilNumber: barCouncilNumber || barCouncilId,
+      specializations: specs,
       location: {
         type: 'Point',
-        coordinates: [parseFloat(lng) || 0, parseFloat(lat) || 0],
+        coordinates: [longitude, latitude],
         address: { city: city || '', state: state || '', street: street || '' },
       },
-      consultationFee: Number(consultationFee) || 500,
-      experience: Number(experience) || 0,
+      consultationFee: fee,
+      experience: experienceYears,
       verificationStatus: 'approved',
       isVerified: true,
     });
 
     res.status(201).json({ success: true, data: { user: user._id, advocate: advocate._id } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (createdUser?._id) await User.findByIdAndDelete(createdUser._id).catch(() => {});
+    next(err);
+  }
 };
 
 exports.updateAdvocate = async (req, res, next) => {
@@ -909,7 +1025,7 @@ exports.updateAdvocate = async (req, res, next) => {
     // Fields that belong to User model
     const { name, phone, email, city, state, street, avatar: avatarUrl,
             barCouncilId, barCouncilNumber, specializations, consultationFee,
-            experience, bio } = req.body;
+            experience, bio, lat, lng } = req.body;
 
     // Update User record
     const userUpdate = {};
@@ -947,7 +1063,7 @@ exports.updateAdvocate = async (req, res, next) => {
 
     // Update Advocate record
     const advUpdate = {};
-    if (barCouncilId || barCouncilNumber) advUpdate.barCouncilId = barCouncilId || barCouncilNumber;
+    if (barCouncilId || barCouncilNumber) advUpdate.barCouncilNumber = barCouncilId || barCouncilNumber;
     if (specializations) {
       advUpdate.specializations = Array.isArray(specializations)
         ? specializations
@@ -958,6 +1074,14 @@ exports.updateAdvocate = async (req, res, next) => {
     if (bio !== undefined) advUpdate.bio = bio;
     if (city || state || street) {
       advUpdate['location.address'] = { city: city || '', state: state || '', street: street || '' };
+    }
+    if (lat !== undefined || lng !== undefined) {
+      const latitude = lat !== undefined ? Number(lat) : advocate.location?.coordinates?.[1];
+      const longitude = lng !== undefined ? Number(lng) : advocate.location?.coordinates?.[0];
+      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        return next(new (require('../middlewares/errorHandler').AppError)('Valid latitude and longitude are required.', 400));
+      }
+      advUpdate['location.coordinates'] = [longitude, latitude];
     }
 
     const updated = await AdvocateModel.findByIdAndUpdate(req.params.id, advUpdate, { new: true })
@@ -974,7 +1098,8 @@ exports.deleteAdvocate = async (req, res, next) => {
     const Advocate = require('../models/Advocate');
     const advocate = await Advocate.findByIdAndDelete(req.params.id);
     if (!advocate) return next(new (require('../middlewares/errorHandler').AppError)('Advocate not found.', 404));
-    res.json({ success: true, message: 'Advocate deleted.' });
+    await User.findByIdAndUpdate(advocate.user, { isActive: false });
+    res.json({ success: true, message: 'Advocate profile deleted and linked login disabled.' });
   } catch (err) { next(err); }
 };
 
@@ -1139,7 +1264,7 @@ exports.getPaymentHistory = async (req, res, next) => {
     if (advocateId) filter.advocate = advocateId;
 
     const skip = (Number(page) - 1) * Number(limit);
-    const [payments, total, summary] = await Promise.all([
+    const [payments, total, summary, statusCounts] = await Promise.all([
       Booking.find(filter).lean()
         .populate('client', 'name email phone avatar')
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } })
@@ -1157,7 +1282,13 @@ exports.getPaymentHistory = async (req, res, next) => {
           avgAmount: { $avg: '$payment.amount' },
         }},
       ]),
+      Booking.aggregate([
+        { $match: { 'payment.status': { $in: ['paid', 'refunded', 'failed', 'pending'] } } },
+        { $group: { _id: '$payment.status', count: { $sum: 1 } } },
+      ]),
     ]);
+
+    const counts = Object.fromEntries(statusCounts.map(item => [item._id, item.count]));
 
     res.json({
       success: true,
@@ -1165,7 +1296,13 @@ exports.getPaymentHistory = async (req, res, next) => {
       total,
       page: Number(page),
       pages: Math.ceil(total / Number(limit)),
-      summary: summary[0] || { totalCollected: 0, totalBookings: 0, avgAmount: 0 },
+      summary: {
+        ...(summary[0] || { totalCollected: 0, totalBookings: 0, avgAmount: 0 }),
+        paidCount: counts.paid || 0,
+        pendingCount: counts.pending || 0,
+        failedCount: counts.failed || 0,
+        refundedCount: counts.refunded || 0,
+      },
     });
   } catch (err) { next(err); }
 };
@@ -1190,7 +1327,7 @@ exports.getTransactionHistory = async (req, res, next) => {
     if (from || to) bookingFilter['payment.paidAt'] = dateFilter;
 
     // 2. Withdrawals (advocate payouts)
-    const withdrawalFilter = { status: { $in: ['completed', 'pending', 'processing'] } };
+    const withdrawalFilter = { status: { $in: ['paid', 'approved', 'pending'] } };
     if (advocateId) withdrawalFilter.advocate = advocateId;
     if (from || to) withdrawalFilter.createdAt = dateFilter;
 
@@ -1198,10 +1335,10 @@ exports.getTransactionHistory = async (req, res, next) => {
       (type === 'payout' ? Promise.resolve([]) : Booking.find(bookingFilter).lean()
         .populate('client', 'name email avatar')
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } })
-        .sort('-createdAt').limit(200).lean()),
+        .sort('-createdAt').lean()),
       (type === 'payment' ? Promise.resolve([]) : Withdrawal.find(withdrawalFilter).lean()
         .populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } })
-        .sort('-createdAt').limit(200).lean()),
+        .sort('-createdAt').lean()),
       require('../models/Settings').findOne({ singletonId: 'global' }),
     ]);
 
@@ -1244,7 +1381,7 @@ exports.getTransactionHistory = async (req, res, next) => {
     const paginated = transactions.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
     const totalPayments = bookings.reduce((s, b) => s + (b.payment?.amount || 0), 0);
-    const totalPayouts = withdrawals.reduce((s, w) => s + (w.amount || 0), 0);
+    const totalPayouts = withdrawals.reduce((s, w) => s + (w.status === 'paid' ? (w.amount || 0) : 0), 0);
     const totalCommission = Math.round(totalPayments * commissionRate / 100);
 
     res.json({

@@ -2,6 +2,7 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const axios = require('axios');
 const logger = require('./logger');
+const { getPlatformSettings } = require('../middlewares/platformSettings');
 
 /**
  * Creates a notification in the database and triggers an Expo push notification if the user has a push token registered.
@@ -27,7 +28,8 @@ exports.createNotification = async ({ recipientId, senderId, title, message, typ
       return notification;
     }
 
-    const expoToken = recipient?.expoPushToken || recipient?.fcmToken;
+    const settings = await getPlatformSettings();
+    const expoToken = settings.features?.pushEnabled === false ? null : (recipient?.expoPushToken || recipient?.fcmToken);
 
     // 3. Trigger Push Notification if token exists
     if (expoToken && (expoToken.startsWith('ExponentPushToken') || expoToken.length > 10)) {

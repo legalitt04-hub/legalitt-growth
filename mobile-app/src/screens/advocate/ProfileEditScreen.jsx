@@ -309,10 +309,13 @@ const ProfileEditScreen = ({ navigation }) => {
           <View style={styles.avatarSection}>
             <TouchableOpacity onPress={pickImage} disabled={uploading}>
               <View style={styles.avatarWrapper}>
-                <Image 
-                  source={{ uri: user?.avatar || 'https://i.pravatar.cc/200?img=1' }} 
-                  style={styles.avatar} 
-                />
+                {user?.avatar ? (
+                  <Image source={{ uri: user.avatar }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Ionicons name="person" size={40} color="#64748B" />
+                  </View>
+                )}
                 <View style={styles.cameraBtn}>
                   <Ionicons name="camera" size={18} color="#fff" />
                 </View>
@@ -618,6 +621,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#FFFFFF',
   },
+  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   cameraBtn: {
     position: 'absolute',
     bottom: 0,

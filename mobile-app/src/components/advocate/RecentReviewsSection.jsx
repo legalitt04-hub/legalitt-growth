@@ -62,33 +62,23 @@ export default function RecentReviewsSection({
   const totalReviews = ratingStats?.totalReviews ?? (reviews.length || advocateRating?.count || 0);
   const averageRating = Number(
     ratingStats?.averageRating ?? advocateRating?.average ?? (reviews.length > 0
-      ? (reviews.reduce((acc, r) => acc + (r.rating || 5), 0) / reviews.length).toFixed(1)
+      ? (reviews.reduce((acc, r) => acc + Number(r.rating || 0), 0) / reviews.length).toFixed(1)
       : 0)
   );
   
   const positiveReviewsPercent = ratingStats?.positivePercentage ?? (reviews.length > 0
-    ? Math.round((reviews.filter((r) => (r.rating || 5) >= 4).length / reviews.length) * 100)
-    : (totalReviews > 0 ? 94 : 0));
+    ? Math.round((reviews.filter((r) => Number(r.rating || 0) >= 4).length / reviews.length) * 100)
+    : 0);
 
   // Rating distribution counts (5, 4, 3, 2, 1)
   const distribution = ratingStats?.distribution || (() => {
     if (reviews.length > 0) {
       const dist = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
       reviews.forEach((r) => {
-        const star = Math.min(5, Math.max(1, Math.round(r.rating || 5)));
+        const star = Math.min(5, Math.max(1, Math.round(Number(r.rating || 0))));
         dist[star] = (dist[star] || 0) + 1;
       });
       return dist;
-    }
-    // If advocate has ratings but no raw items (e.g. populated stats)
-    if (totalReviews > 0) {
-      return {
-        5: Math.round(totalReviews * 0.82),
-        4: Math.round(totalReviews * 0.12),
-        3: Math.round(totalReviews * 0.04),
-        2: Math.round(totalReviews * 0.01),
-        1: Math.round(totalReviews * 0.01),
-      };
     }
     return { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
   })();
@@ -236,23 +226,22 @@ export default function RecentReviewsSection({
                   ) : (
                     <View style={styles.avatarFallback}>
                       <Text style={styles.avatarInitial}>
-                        {(recentReview.client?.name || 'Rahul Sharma')[0].toUpperCase()}
+                        {(recentReview.client?.name || 'Client')[0].toUpperCase()}
                       </Text>
                     </View>
                   )}
                   <View style={styles.nameWrap}>
                     <Text style={styles.clientName} numberOfLines={1}>
-                      {recentReview.client?.name || 'Rahul Sharma'}
+                      {recentReview.client?.name || 'Client'}
                     </Text>
                   </View>
                 </View>
-                <StarRating rating={recentReview.rating || 5} size={12} />
+                <StarRating rating={Number(recentReview.rating || 0)} size={12} />
               </View>
 
               {/* Review Text */}
               <Text style={styles.reviewComment} numberOfLines={3}>
-                {recentReview.comment ||
-                  'Very professional and explained the legal process clearly. The consultation was helpful and easy to understand.'}
+                {recentReview.comment || 'No written comment provided.'}
               </Text>
 
               {/* Card Footer: Consultation Type, Timestamp, Right Chevron */}

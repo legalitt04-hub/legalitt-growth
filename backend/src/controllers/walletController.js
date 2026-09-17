@@ -151,7 +151,10 @@ exports.creditAdvocateWallet = async ({ advocateId, bookingAmount, bookingId }) 
     }
 
     // Update wallet balance + append earning transaction
-    await Advocate.findByIdAndUpdate(advocateId, {
+    const credited = await Advocate.findOneAndUpdate({
+      _id: advocateId,
+      'wallet.earningTransactions.bookingId': { $ne: bookingId },
+    }, {
       $inc: {
         'wallet.balance':     advocateEarning,
         'wallet.totalEarned': advocateEarning,
@@ -170,7 +173,12 @@ exports.creditAdvocateWallet = async ({ advocateId, bookingAmount, bookingId }) 
           creditedAt:     new Date(),
         },
       },
-    });
+    }, { new: true });
+
+    if (!credited) {
+      logger.info(`[Wallet] Skipped duplicate credit for booking ${bookingId}`);
+      return { advocateEarning: 0, platformFee: 0, commissionRate, alreadyCredited: true };
+    }
 
     logger.info(`[Wallet] Advocate ${advocateId} credited ₹${advocateEarning} (${100 - commissionRate}% of ₹${bookingAmount}) for booking ${bookingId}`);
     return { advocateEarning, platformFee, commissionRate };

@@ -30,18 +30,12 @@ try {
 } catch (_) {}
 
 // ── Zego credentials ──────────────────────────────────────────────────────
-const _extra = Constants.expoConfig?.extra ?? {};
-const FALLBACK_APP_ID   = 954831467;
-const FALLBACK_APP_SIGN = '6aaa4f1b530a5ddff76b050d56a56974101548cf30d10b1c547feb7da07b16ad';
-
 function resolveAppId(param) {
-  const fromEnv   = Number(_extra.ZEGO_APP_ID);
   const fromParam = Number(param);
-  return (fromEnv > 0 ? fromEnv : 0) || (fromParam > 0 ? fromParam : 0) || FALLBACK_APP_ID;
+  return fromParam > 0 ? fromParam : 0;
 }
 function resolveAppSign() {
-  const s = String(_extra.ZEGO_APP_SIGN ?? '');
-  return s.length > 10 ? s : FALLBACK_APP_SIGN;
+  return '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -61,14 +55,14 @@ export default function AdvocateCallScreen({ navigation, route }) {
   } = route?.params ?? {};
 
   const stableUserIdRef = useRef(
-    myUserId ? String(myUserId) : `adv_${Math.floor(Math.random() * 1e9)}`
+    myUserId ? String(myUserId) : ''
   );
   const callStartRef = useRef(Date.now());
 
   const effectiveAppId   = resolveAppId(zegoAppId);
   const effectiveAppSign = resolveAppSign();
   const zegoRoomId       = paramRoomId || (bookingId ? `legalitt-${bookingId}` : null);
-  const isCallReady      = !!zegoRoomId && effectiveAppId > 0;
+  const isCallReady      = !!zegoRoomId && effectiveAppId > 0 && !!zegoToken && !!stableUserIdRef.current;
 
   const [permissionsGranted, setPermissionsGranted] = useState(Platform.OS === 'ios');
   const [zegoReady, setZegoReady] = useState(false);

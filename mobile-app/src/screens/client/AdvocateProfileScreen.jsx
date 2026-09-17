@@ -62,7 +62,7 @@ const AdvocateProfileScreen = ({ navigation, route }) => {
             id: adv._id,
             userId: adv.user?._id,
             name: adv.user?.name || "Unknown",
-            avatar: adv.user?.avatar || `https://i.pravatar.cc/150?u=${adv.user?._id || adv._id}`,
+            avatar: adv.user?.avatar || null,
             title: "Advocate",
             tags: adv.specializations?.slice(0, 3) || [],
             rating: adv.rating?.average || 0,
@@ -205,12 +205,16 @@ const AdvocateProfileScreen = ({ navigation, route }) => {
         {/* Profile Header */}
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
-            <Image
-              source={{
-                uri: advocate.avatar || route?.params?.advocateAvatar || `https://i.pravatar.cc/150?u=${advocate._id || advocate.id}`
-              }}
-              style={styles.avatar}
-            />
+            {(advocate.avatar || route?.params?.advocateAvatar) ? (
+              <Image
+                source={{ uri: advocate.avatar || route?.params?.advocateAvatar }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarInitial}>{advocate.name?.[0]?.toUpperCase() || 'A'}</Text>
+              </View>
+            )}
             {advocate.online && (
               <View style={styles.onlineBadge}>
                 <Text style={styles.onlineBadgeText}>● Online</Text>
@@ -434,15 +438,14 @@ const ExperienceTab = ({ advocate }) => (
     <Section
       title="Professional Background"
       items={[
-        `${advocate?.experience || '5'}+ Years of Legal Practice`,
-        'Consultation across multiple court levels',
-        'Expertise in documentation and legal due diligence',
-        'Representation in District & High Courts',
-      ]}
+        advocate?.experience !== undefined ? `${advocate.experience} Years of Legal Practice` : null,
+        advocate?.barCouncilNumber ? `Bar Council: ${advocate.barCouncilNumber}` : null,
+        advocate?.about || null,
+      ].filter(Boolean)}
     />
     <Section
       title="Core Practice Areas"
-      items={(advocate?.specializations || ['Legal Services']).map(s => s)}
+      items={(advocate?.specializations || []).map(s => s)}
     />
     <Section
       title="Professional Approach"
@@ -664,10 +667,15 @@ const ReviewsTab = ({ advocate, advocateId }) => {
           reviews.map((item) => (
             <View key={item._id} style={styles.reviewCard}>
               <View style={styles.reviewHeader}>
-                <Image
-                  source={{ uri: item.client?.avatar || `https://i.pravatar.cc/150?u=${item.client?._id || item._id}` }}
-                  style={styles.reviewAvatar}
-                />
+                {item.client?.avatar ? (
+                  <Image source={{ uri: item.client.avatar }} style={styles.reviewAvatar} />
+                ) : (
+                  <View style={[styles.reviewAvatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.reviewAvatarInitial}>
+                      {(item.client?.name || 'A')[0].toUpperCase()}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.reviewHeaderMeta}>
                   <Text style={styles.reviewName}>{item.client?.name || 'Anonymous User'}</Text>
                   <View style={styles.starsRow}>
@@ -757,6 +765,8 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 16,
   },
+  avatarPlaceholder: { backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
   onlineBadge: {
     position: 'absolute',
     bottom: -4,
@@ -1025,6 +1035,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
   },
+  reviewAvatarInitial: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   reviewName: {
     fontSize: 12,
     fontWeight: '600',

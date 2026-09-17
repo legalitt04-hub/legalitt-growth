@@ -5,7 +5,12 @@ const { Chat } = require('../models/Chat');
 const { AppError } = require('../middlewares/errorHandler');
 const logger = require('../utils/logger');
 const { createNotification } = require('../utils/notificationHelper');
-const { setupZegoCall } = require('../services/zegoService');
+const { setupZegoCall, generateZegoToken } = require('../services/zegoService');
+
+const STAFF_ROLES = new Set([
+  'admin', 'super_admin', 'superadmin', 'support_executive', 'support',
+  'accounts', 'forensic_expert', 'property_verification',
+]);
 
 // POST /api/bookings
 exports.createBooking = async (req, res, next) => {
@@ -22,13 +27,17 @@ exports.createBooking = async (req, res, next) => {
     if (!timeSlot || !timeSlot.startTime) {
       return next(new AppError('A valid preferred time slot is required.', 400));
     }
+    const platformSettings = await require('../middlewares/platformSettings').getPlatformSettings();
+    const bookingDate = new Date(date);
+    const latestAllowedDate = new Date(Date.now() + Number(platformSettings.maxAdvanceBookingDays || 30) * 86400000);
+    if (bookingDate > latestAllowedDate) return next(new AppError(`Bookings can only be made up to ${platformSettings.maxAdvanceBookingDays || 30} days in advance.`, 400));
 
     const advocate = await Advocate.findById(advocateId).populate('user', 'name fcmToken');
     if (!advocate) return next(new AppError('Advocate not found.', 404));
     if (advocate.verificationStatus !== 'approved') return next(new AppError('Advocate is not verified.', 400));
 
     // Determine fee
-    let amount = advocate.consultationFee || 0;
+    let amount = Math.max(Number(advocate.consultationFee || 0), Number(platformSettings.minFee || 0));
     if (isFollowUp && parentBookingId) {
       const parent = await Booking.findById(parentBookingId);
       if (parent && parent.client.toString() === req.user._id.toString()) {
@@ -257,8 +266,21 @@ exports.updateStatus = async (req, res, next) => {
     const isClient = booking.client.toString() === req.user._id.toString();
     const isAdvocate = advocate?.user?.toString() === req.user._id.toString();
 
-    if (!isClient && !isAdvocate && req.user.role !== 'admin')
+    const isStaff = STAFF_ROLES.has(req.user.role);
+    if (!isClient && !isAdvocate && !isStaff)
       return next(new AppError('Not authorized.', 403));
+
+    const allowedByActor = isStaff
+      ? ['pending_assignment', 'pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rescheduled', 'no_show']
+      : isAdvocate
+        ? ['confirmed', 'in_progress', 'completed', 'cancelled', 'rescheduled', 'no_show']
+        : ['cancelled'];
+    if (!allowedByActor.includes(status)) {
+      return next(new AppError('This status change is not permitted.', 403));
+    }
+    if (['confirmed', 'in_progress', 'completed'].includes(status) && !['paid', 'not_required'].includes(booking.payment?.status)) {
+      return next(new AppError('Payment must be confirmed before this status change.', 409));
+    }
 
     booking.status = status;
     if (cancellationReason) {
@@ -320,6 +342,18 @@ exports.getBooking = async (req, res, next) => {
       .populate({ path: 'advocate', populate: { path: 'user', select: 'name avatar' } })
       .populate('client', 'name avatar phone');
     if (!booking) return next(new AppError('Booking not found.', 404));
+
+    const requesterId = req.user._id.toString();
+    const isClient = booking.client?._id?.toString() === requesterId;
+    const isAdvocate = booking.advocate?.user?._id?.toString() === requesterId;
+    const isStaff = STAFF_ROLES.has(req.user.role);
+    if (!isClient && !isAdvocate && !isStaff) {
+      return next(new AppError('Not authorized to view this booking.', 403));
+    }
+
+    // Never expose the other party's call token.
+    if (isAdvocate) booking.videoRoomToken = undefined;
+    else booking.advocateVideoToken = undefined;
     res.json({ success: true, data: booking });
   } catch (err) { next(err); }
 };
@@ -406,6 +440,12 @@ exports.canJoinCall = async (req, res, next) => {
         message: 'This consultation has been cancelled.',
       });
     }
+    if (booking.payment?.status !== 'paid') {
+      return next(new AppError('Payment is required before joining this call.', 409));
+    }
+    if (!['voice', 'video'].includes(booking.consultationMode)) {
+      return next(new AppError('This consultation does not include calls.', 409));
+    }
 
     // Appointment time window check (5-minute pre-buffer, 60-minute post-buffer)
     const now = Date.now();
@@ -437,8 +477,16 @@ exports.canJoinCall = async (req, res, next) => {
       }
     }
 
-    const isAdvocate = userIdStr === advUserIdStr;
-    const token = isAdvocate ? booking.advocateVideoToken : booking.videoRoomToken;
+    const roomId = booking.videoRoomId || `legalitt-${booking._id}`;
+    let token = null;
+    if (canJoin) {
+      try {
+        token = generateZegoToken(userIdStr, roomId, 7200);
+      } catch (tokenErr) {
+        logger.error(`[Zego] Fresh call token failed for booking ${booking._id}: ${tokenErr.message}`);
+        return next(new AppError('Secure call service is unavailable.', 503));
+      }
+    }
 
     res.json({
       success: true,
@@ -447,15 +495,17 @@ exports.canJoinCall = async (req, res, next) => {
       message: canJoin ? 'Call allowed' : reason === 'TOO_EARLY' ? 'Call window not open yet' : 'Appointment time window expired',
       data: {
         bookingId: booking._id,
-        zegoRoomId: booking.videoRoomId || `legalitt-${booking._id}`,
+        zegoRoomId: roomId,
         zegoToken: token || null,
-        zegoAppId: booking.zegoAppId || 0,
+        zegoAppId: Number(process.env.ZEGO_APP_ID || booking.zegoAppId || 0),
         clientName: booking.client?.name || 'Client',
         advocateName: booking.advocate?.user?.name || 'Advocate',
+        myUserId: userIdStr,
+        myUserName: req.user.name || (userIdStr === advUserIdStr ? 'Advocate' : 'Client'),
+        targetRoute: userIdStr === advUserIdStr ? 'AdvocateCall' : 'VideoCall',
         scheduledStart: booking.date || null,
         bufferHours: bufferHours,
       },
     });
   } catch (err) { next(err); }
 };
-

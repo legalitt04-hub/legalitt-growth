@@ -12,7 +12,6 @@ import {
 import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
 import { getSocket } from '../../services/socket';
 import { callsAPI } from '../../services/api';
 
@@ -33,13 +32,8 @@ try {
   console.log('Failed to load Zego natively:', err);
 }
 
-// ── Credentials ──────────────────────────────────────────────────────────────
-const _extra = Constants.expoConfig?.extra ?? {};
-const FALLBACK_APP_ID   = 954831467;
-const FALLBACK_APP_SIGN = '6aaa4f1b530a5ddff76b050d56a56974101548cf30d10b1c547feb7da07b16ad';
-
-function getAppId(param)  { const n = Number(_extra.ZEGO_APP_ID ?? param); return n > 0 ? n : FALLBACK_APP_ID; }
-function getAppSign()     { const s = String(_extra.ZEGO_APP_SIGN ?? ''); return s.length > 10 ? s : FALLBACK_APP_SIGN; }
+// App ID and short-lived room token must come from the authenticated backend.
+function getAppId(param) { const n = Number(param); return n > 0 ? n : 0; }
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,10 +86,9 @@ export default function CustomCallScreen({ navigation, route }) {
   const cleanedUp    = useRef(false);
   const hangupCalled = useRef(false);          // prevent double hangup
   const pendingStreamId = useRef(null);        // store stream ID if remoteRef not ready yet
-  const stableId     = useRef(myUserId ? String(myUserId) : `u_${Date.now()}`);
+  const stableId     = useRef(myUserId ? String(myUserId) : '');
   const roomId       = zegoRoomId || (bookingId ? `legalitt-${bookingId}` : null);
   const appID        = getAppId(zegoAppId);
-  const appSign      = getAppSign();
 
   // ── Pulse animation ───────────────────────────────────────────────────────
   const pulse = useRef(new Animated.Value(1)).current;
@@ -134,7 +127,8 @@ export default function CustomCallScreen({ navigation, route }) {
       ? Math.floor((Date.now() - startRef.current) / 1000)
       : 0;
 
-    // Emit socket events
+    let recordedBySocket = false;
+    // Emit socket events. The socket backend persists the call log and chat event.
     try {
       const socket = getSocket();
       if (socket) {
@@ -144,13 +138,15 @@ export default function CustomCallScreen({ navigation, route }) {
           socket.emit('call_missed', { bookingId, clientId, advocateUserId, mode });
         }
         socket.emit('call_ended', { bookingId, clientId, advocateUserId });
+        recordedBySocket = true;
       }
     } catch (_) {}
 
-    // Log to backend
+    // REST is a fallback only when the socket is unavailable; doing both created
+    // duplicate call-history entries.
     try {
       const resolvedClientId = clientId || (advocateUserId !== stableId.current ? stableId.current : null);
-      if (resolvedClientId) {
+      if (!recordedBySocket && resolvedClientId) {
         await callsAPI.logCall({
           bookingId:      bookingId || null,
           clientUserId:   resolvedClientId,
@@ -178,8 +174,9 @@ export default function CustomCallScreen({ navigation, route }) {
 
   // ── Init Zego Express Engine ──────────────────────────────────────────────
   useEffect(() => {
-    if (!roomId) {
-      setStatus('connected');
+    if (!roomId || !appID || !zegoToken || !stableId.current) {
+      setStatus('failed');
+      Alert.alert('Call unavailable', 'Secure call credentials are missing. Please return and try again.');
       return;
     }
     if (!ZegoExpressEngine) {
@@ -202,7 +199,7 @@ export default function CustomCallScreen({ navigation, route }) {
         // 2. Create engine
         const engine = await ZegoExpressEngine.createEngineWithProfile({
           appID,
-          appSign,
+          appSign: '',
           scenario: 0,
         });
         engineRef.current = engine;
@@ -228,12 +225,6 @@ export default function CustomCallScreen({ navigation, route }) {
             // Connected
             setStatus('connected');
             setIsReconnecting(false);
-            if (!startRef.current) startRef.current = Date.now();
-            if (!timerRef.current) {
-              timerRef.current = setInterval(() => {
-                setDuration(Math.floor((Date.now() - startRef.current) / 1000));
-              }, 1000);
-            }
           } else if (state === 1 && status === 'connected') {
             setIsReconnecting(true);
           } else if (state === 0 && errCode !== 0) {
@@ -271,6 +262,12 @@ export default function CustomCallScreen({ navigation, route }) {
 
             setTimeout(() => tryPlay(), 400);
             setRemoteHere(true);
+            if (!startRef.current) startRef.current = Date.now();
+            if (!timerRef.current) {
+              timerRef.current = setInterval(() => {
+                setDuration(Math.floor((Date.now() - startRef.current) / 1000));
+              }, 1000);
+            }
           }
         });
 
@@ -278,7 +275,7 @@ export default function CustomCallScreen({ navigation, route }) {
         await engine.loginRoom(
           roomId,
           { userID: stableId.current, userName: myUserName },
-          { isUserStatusNotify: true }
+          { isUserStatusNotify: true, token: zegoToken }
         );
 
         // 6. Start local camera preview — retry until localRef is mounted
@@ -313,7 +310,8 @@ export default function CustomCallScreen({ navigation, route }) {
 
       } catch (err) {
         console.warn('[CustomCall] init error:', err?.message);
-        setStatus('connected'); // Show UI anyway
+        setStatus('failed');
+        Alert.alert('Call connection failed', err?.message || 'Please try again.');
       }
     };
 
@@ -365,9 +363,9 @@ export default function CustomCallScreen({ navigation, route }) {
         if (socket) {
           socket.emit('call_missed', { bookingId, clientId, advocateUserId, mode });
           socket.emit('call_ended',  { bookingId, clientId, advocateUserId });
-        }
-        const resolvedClientId = clientId || stableId.current;
-        if (resolvedClientId) {
+        } else {
+          const resolvedClientId = clientId || stableId.current;
+          if (!resolvedClientId) throw new Error('Client ID unavailable');
           await callsAPI.logCall({
             bookingId:      bookingId || null,
             clientUserId:   resolvedClientId,

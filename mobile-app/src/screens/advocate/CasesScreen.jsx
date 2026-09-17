@@ -16,7 +16,6 @@ import { Ionicons, Feather } from '@expo/vector-icons';
 import { bookingAPI } from '../../services/api';
 import { COLORS } from '../../constants/theme';
 import { formatDate } from '../../utils/helpers';
-import { MOCK_ADVOCATE_CASES } from '../../data/advocateCasesMock';
 import SkeletonLoader from '../../components/common/SkeletonLoader';
 
 import { getSocket } from '../../services/socket';
@@ -37,7 +36,7 @@ const CasesScreen = ({ navigation }) => {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  // ─── Data Fetching with Development Mock Fallback ──────────────────────────
+  // ─── Data Fetching ─────────────────────────────────────────────────────────
   const fetchTodayCases = async () => {
     try {
       if (todayCases.length === 0) setLoadingToday(true);
@@ -149,12 +148,17 @@ const CasesScreen = ({ navigation }) => {
 
 
   const handleNavigateToCase = (item) => {
+    const caseId = item.caseId || item._id;
+    if (!caseId) {
+      Alert.alert('Case Unavailable', 'This case does not have a valid identifier.');
+      return;
+    }
     navigation.navigate('CaseDetail', {
-      caseId: item.caseId || item._id || 'CASE-DEMO-001',
+      caseId,
       booking: item,
       client: item.client,
-      clientName: item.client?.name || 'Rahul Sharma',
-      caseTitle: item.issue || item.caseType || 'Divorce Matter',
+      clientName: item.client?.name || 'Client',
+      caseTitle: item.issue || item.caseType || 'Legal matter',
     });
   };
 

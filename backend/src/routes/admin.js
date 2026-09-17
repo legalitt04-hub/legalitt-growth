@@ -5,13 +5,69 @@ const { protect, authorize } = require('../middlewares/auth');
 const adminController = require('../controllers/adminController');
 const adsController   = require('../controllers/adsController');
 const roleController  = require('../controllers/roleController');
+const { AppError } = require('../middlewares/errorHandler');
 
 const os = require('os');
 const upload = multer({ dest: os.tmpdir() });
+const bulkUpload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const extension = file.originalname.split('.').pop().toLowerCase();
+    cb(extension && ['csv', 'xls', 'xlsx'].includes(extension) ? null : new AppError('Only CSV, XLS and XLSX files are supported', 400), ['csv', 'xls', 'xlsx'].includes(extension));
+  },
+});
+const brandUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon'];
+    cb(allowed.includes(file.mimetype) ? null : new AppError('Use a PNG, JPG, WEBP or ICO image', 400), allowed.includes(file.mimetype));
+  },
+});
 
 // All admin routes require auth + admin role
 const validAdminRoles = ['admin', 'super_admin', 'superadmin', 'support_executive', 'support', 'accounts', 'forensic_expert', 'property_verification'];
 router.use(protect, authorize(...validAdminRoles));
+const requireSuperAdmin = authorize('super_admin', 'superadmin');
+
+// Restrict specialized staff at the API boundary. Admins retain full operational
+// access; super admins additionally control privileged account mutations below.
+const specializedAccess = {
+  support_executive: [
+    /^\/(stats|activity|health|recent-registrations)$/,
+    /^\/(bookings|consultations|chat-history|call-history)(\/|$)/,
+    /^\/support-tickets(\/|$)/,
+    /^\/notifications(\/|$)/,
+  ],
+  support: [
+    /^\/(stats|activity|health|recent-registrations)$/,
+    /^\/(bookings|consultations|chat-history|call-history)(\/|$)/,
+    /^\/support-tickets(\/|$)/,
+    /^\/notifications(\/|$)/,
+  ],
+  accounts: [
+    /^\/(stats|revenue|activity|health)$/,
+    /^\/(earnings|withdrawals|payment-history|payments|transactions|pricing)(\/|$)/,
+  ],
+  forensic_expert: [
+    /^\/(stats|activity|health)$/,
+    /^\/document-forensic(\/|$)/,
+    /^\/documents(\/|$)/,
+  ],
+  property_verification: [
+    /^\/(stats|activity|health)$/,
+    /^\/property-research(\/|$)/,
+    /^\/documents(\/|$)/,
+  ],
+};
+
+router.use((req, res, next) => {
+  if (['admin', 'super_admin', 'superadmin'].includes(req.user.role)) return next();
+  const allowed = specializedAccess[req.user.role] || [];
+  if (allowed.some(pattern => pattern.test(req.path))) return next();
+  return res.status(403).json({ success: false, message: 'You do not have permission to access this admin resource.' });
+});
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 router.get('/stats',                adminController.getDashboardStats);
@@ -30,15 +86,15 @@ router.get('/clients',                     adminController.getUsersList);  // al
 router.get('/users/:id',                   adminController.getUserDetail);
 router.post('/users',                      adminController.createUser);
 router.patch('/users/:id',                 upload.single('avatar'), adminController.updateUser);
-router.delete('/users/:id',               adminController.deleteUser);
+router.delete('/users/:id',               requireSuperAdmin, adminController.deleteUser);
 router.patch('/users/:id/toggle',          adminController.toggleUserBan);
-router.patch('/users/:id/role',            adminController.updateUserRole);
-router.post('/users/:id/reset-password',   adminController.resetUserPassword);
+router.patch('/users/:id/role',            requireSuperAdmin, adminController.updateUserRole);
+router.post('/users/:id/reset-password',   requireSuperAdmin, adminController.resetUserPassword);
 
 // ─── Advocates Management ────────────────────────────────────────────────
 router.get('/advocates',                    adminController.getAdvocatesList);
 router.post('/advocates',                   adminController.createAdvocate);
-router.post('/advocates/bulk-upload',       upload.single('file'), adminController.bulkUploadAdvocates);
+router.post('/advocates/bulk-upload',       bulkUpload.single('file'), adminController.bulkUploadAdvocates);
 router.get('/advocates/:id',                adminController.getAdvocateDetail);
 router.get('/advocates/:id/earnings',       adminController.getAdvocateEarnings);
 router.patch('/advocates/:id',              upload.single('avatar'), adminController.updateAdvocate);
@@ -49,6 +105,7 @@ router.patch('/advocates/:id/suspend',      adminController.suspendAdvocate);
 // ─── Settings Management ────────────────────────────────────────────────────────
 router.get('/settings',               adminController.getSettings);
 router.put('/settings',               adminController.updateSettings);
+router.post('/settings/branding-upload', brandUpload.single('file'), adminController.uploadBrandAsset);
 
 // ─── Legal Requests (Legal Advice + Legal Notice) ────────────────────────────
 router.get('/legal-requests',         adminController.getLegalRequests);
@@ -59,6 +116,7 @@ router.get('/cases',                  adminModuleController.getCases);
 router.put('/cases/:id',              adminModuleController.updateCase);
 router.delete('/cases/:id',           adminModuleController.deleteCase);
 router.get('/services',               adminModuleController.getServices);
+router.post('/services',              adminModuleController.createService);
 router.put('/services/:id',           adminModuleController.updateService);
 router.get('/documents',              adminModuleController.getDocuments);
 router.post('/documents/upload-for-booking', upload.single('file'), adminModuleController.uploadDocForBooking);
@@ -67,6 +125,12 @@ router.put('/support-tickets/:id',          adminModuleController.updateSupportT
 router.post('/support-tickets/:id/reply',   adminModuleController.replyToTicket);
 router.get('/ai-drafts',              adminModuleController.getAIDrafts);
 router.get('/notifications/templates',adminModuleController.getNotificationTemplates);
+router.get('/notifications/stats',    adminModuleController.getNotificationStats);
+router.post('/notifications/templates', adminModuleController.createNotificationTemplate);
+router.put('/notifications/templates/:id', adminModuleController.updateNotificationTemplate);
+router.delete('/notifications/templates/:id', adminModuleController.deleteNotificationTemplate);
+router.post('/notifications/broadcast', adminModuleController.sendBroadcastNotification);
+router.get('/calendar',               adminModuleController.getCalendarEvents);
 
 // ─── Production 17-Module Routes ─────────────────────────────────────────────
 router.get('/categories',             adminModuleController.getCategories);
@@ -125,10 +189,10 @@ router.post('/ads/:id/record',     adsController.recordEvent);
 // ─── Role-Based Access Management ────────────────────────────────────────────
 router.get('/roles/permissions',           roleController.getRolePermissions);
 router.get('/roles/accounts',              roleController.getAdminAccounts);
-router.post('/roles/accounts',             roleController.createAdminAccount);
-router.patch('/roles/accounts/:id',        roleController.updateAdminAccount);
-router.delete('/roles/accounts/:id',       roleController.deleteAdminAccount);
-router.post('/roles/accounts/:id/reset-password', roleController.resetAdminPassword);
+router.post('/roles/accounts',             requireSuperAdmin, roleController.createAdminAccount);
+router.patch('/roles/accounts/:id',        requireSuperAdmin, roleController.updateAdminAccount);
+router.delete('/roles/accounts/:id',       requireSuperAdmin, roleController.deleteAdminAccount);
+router.post('/roles/accounts/:id/reset-password', requireSuperAdmin, roleController.resetAdminPassword);
 
 // ─── Phase 4: User Notes ─────────────────────────────────────────────────────
 router.get('/users/:id/notes',           adminController.getUserNotes);
@@ -171,11 +235,13 @@ router.delete('/fir-drafts/:id',                adminModuleController.deleteFIRD
 router.get('/property-research',                adminModuleController.getPropertyResearch);
 router.put('/property-research/:id/status',     adminModuleController.updatePropertyResearchStatus);
 router.post('/property-research/:id/upload',    upload.single('document'), adminModuleController.uploadPropertyResearchDocument);
+router.delete('/property-research/:id',          adminModuleController.archivePropertyResearch);
 
 // ─── Document Forensic (Admin) ────────────────────────────────────────────────
 router.get('/document-forensic',                adminModuleController.getDocumentForensic);
 router.put('/document-forensic/:id/status',     adminModuleController.updateDocumentForensicStatus);
 router.post('/document-forensic/:id/upload',    upload.single('document'), adminModuleController.uploadDocumentForensicReport);
+router.delete('/document-forensic/:id',          adminModuleController.archiveDocumentForensic);
 
 const pricingController = require('../controllers/pricingController');
 router.put('/pricing/:id', pricingController.updatePrice);
@@ -190,4 +256,3 @@ router.post('/legal-notices/:id/assign',         adminModuleController.assignAdv
 router.delete('/legal-notices/:id',              adminModuleController.deleteLegalNotice);
 
 module.exports = router;
-

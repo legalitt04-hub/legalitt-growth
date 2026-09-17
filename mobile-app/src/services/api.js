@@ -119,7 +119,7 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    // Handle mock cache resolution
+    // Resolve a cached response while the device is offline.
     if (error.isCacheResponse) {
       console.log(`📦 Resolving from local cache: ${error.config.url}`);
       return Promise.resolve({
@@ -132,7 +132,7 @@ api.interceptors.response.use(
       });
     }
 
-    // Handle mock offline queue rejection
+    // Preserve the queued offline mutation signal for the caller.
     if (error.isOfflineQueue) {
       return Promise.reject(error);
     }
@@ -140,7 +140,9 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // 1. Handle Token Refresh (401 status)
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && originalRequest.url !== '/auth/refresh') {
+    const publicAuthPaths = ['/auth/login', '/auth/register', '/auth/google', '/auth/send-otp', '/auth/verify-otp', '/auth/forgot-password', '/auth/reset-password'];
+    const isPublicAuthRequest = publicAuthPaths.some(path => originalRequest?.url?.includes(path));
+    if (error.response?.status === 401 && originalRequest && !isPublicAuthRequest && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
       if (isRefreshing) {
         return new Promise(function(resolve, reject) {
           failedQueue.push({ resolve, reject });
@@ -174,8 +176,11 @@ api.interceptors.response.use(
         
       } catch (refreshError) {
         processQueue(refreshError, null);
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
-        await SecureStore.deleteItemAsync(REFRESH_KEY);
+        const refreshStatus = refreshError.response?.status;
+        if ([400, 401, 403].includes(refreshStatus)) {
+          await SecureStore.deleteItemAsync(TOKEN_KEY);
+          await SecureStore.deleteItemAsync(REFRESH_KEY);
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -214,7 +219,7 @@ export const authAPI = {
   logout: (refreshToken) => api.post('/auth/logout', { refreshToken }),
   getMe: () => api.get('/auth/me'),
   deleteAccount: () => api.delete('/users/me'),
-  sendOTP: (email) => api.post('/auth/send-otp', { email }),
+  sendOTP: (email, role = 'client') => api.post('/auth/send-otp', { email, role }),
   verifyOTP: (email, otp, role) => api.post('/auth/verify-otp', { email, otp, role }),
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   verifyResetOTP: (email, otp) => api.post('/auth/verify-reset-otp', { email, otp }),
@@ -238,15 +243,20 @@ export const bookingAPI = {
   create: (data) => api.post('/bookings', data),
   getMy: (params) => api.get('/bookings/my', { params }),
   getBooking: (id) => api.get(`/bookings/${id}`),
-  updateStatus: (id, status) => api.patch(`/bookings/${id}/status`, { status }),
+  updateStatus: (id, statusOrPayload, cancellationReason) => {
+    const payload = typeof statusOrPayload === 'object'
+      ? statusOrPayload
+      : { status: statusOrPayload, ...(cancellationReason ? { cancellationReason } : {}) };
+    return api.patch(`/bookings/${id}/status`, payload);
+  },
   getAdvocateBookings: (params) => api.get('/bookings/advocate', { params }),
   confirmPayment: (data) => api.post('/bookings/confirm-payment', data),
+  canJoinCall: (id) => api.get(`/bookings/${id}/can-join-call`),
 };
 
 export const chatAPI = {
   getChats: () => api.get('/chats'),
   getMyChats: () => api.get('/chats'),
-  getChat: (id) => api.get(`/chats/${id}`),
   sendMessage: (chatId, data) => api.post(`/chats/${chatId}/messages`, data),
   getMessages: (chatId, params) => api.get(`/chats/${chatId}/messages`, { params }),
 };
@@ -268,7 +278,6 @@ export const paymentAPI = {
 
 export const aiAPI = {
   chat: (data) => api.post('/ai/chat', data),
-  firDraft: (data) => api.post('/ai/fir-draft', data),
 };
 
 export const firAPI = {
@@ -301,6 +310,9 @@ export const legalAdviceAPI = {
   confirmPayment:   (data) => api.post('/legal-advice/confirm-payment', data),
   getMyRequests:    (params) => api.get('/legal-advice/my-requests', { params }),
   getRequestDetail: (id) => api.get(`/legal-advice/request/${id}`),
+  generateDraft:    (id, instructions = '') => api.post(`/legal-advice/request/${id}/ai-draft`, { instructions }),
+  saveDraft:        (id, draft) => api.patch(`/legal-advice/request/${id}/draft`, { draft }),
+  submitDocument:   (id, document) => api.post(`/legal-advice/request/${id}/advocate-document`, document),
 };
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -384,4 +396,3 @@ export const uploadAPI = {
 };
 
 export default api;
-

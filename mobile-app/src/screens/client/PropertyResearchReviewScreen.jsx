@@ -16,19 +16,15 @@ const PRIMARY_BEIGE = '#C2A98B';
 
 export default function PropertyResearchReviewScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { propertyData } = route.params || {
-    propertyData: {
-      fullName: 'John Doe',
-      phone: '9876543210',
-      email: 'john@example.com',
-      address: 'Plot 42, Green Avenue, Sector 5',
-      state: 'Madhya Pradesh',
-      city: 'Indore',
-      pincode: '452001',
-      propertyType: 'Residential',
-      purpose: 'Buying',
-    },
-  };
+  const { propertyData } = route.params || {};
+
+  if (!propertyData) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
+        <Text>Property details are unavailable. Please return to the form.</Text>
+      </View>
+    );
+  }
 
   const handleProceedToPayment = () => {
     navigation.navigate('PropertyResearchPayment', { propertyData });

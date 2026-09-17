@@ -1,5 +1,5 @@
 // screens/client/PropertyResearchSuccessScreen.jsx
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -16,18 +16,7 @@ const PRIMARY_BEIGE = '#C2A98B';
 
 export default function PropertyResearchSuccessScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { paymentStatus, requestId, propertyData } = route.params || {};
-
-  // PREMIUM SECURITY GATE: If payment is not completed, redirect to Lock Screen
-  useEffect(() => {
-    if (paymentStatus !== 'SUCCESS') {
-      navigation.replace('PropertyResearchLock');
-    }
-  }, [paymentStatus]);
-
-  if (paymentStatus !== 'SUCCESS') {
-    return null; // Will redirect in useEffect
-  }
+  const { requestId, bookingId, propertyData } = route.params || {};
 
   return (
     <View style={styles.container}>
@@ -65,13 +54,13 @@ export default function PropertyResearchSuccessScreen({ navigation, route }) {
 
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Request ID</Text>
-            <Text style={styles.detailValueHighlight}>{requestId || '#PR-84920'}</Text>
+            <Text style={styles.detailValueHighlight}>{requestId || (bookingId ? `PR-${bookingId.slice(-6).toUpperCase()}` : 'Not available')}</Text>
           </View>
 
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Property Address</Text>
             <Text style={styles.detailValue} numberOfLines={2}>
-              {propertyData?.address || 'Plot 42, Green Avenue, Sector 5, Indore'}
+              {propertyData?.propertyAddress || propertyData?.address || 'Not provided'}
             </Text>
           </View>
 
@@ -111,7 +100,7 @@ export default function PropertyResearchSuccessScreen({ navigation, route }) {
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={() =>
-            navigation.navigate('PropertyResearchTrack', { paymentStatus: 'SUCCESS', requestId, propertyData })
+            navigation.navigate('PropertyResearchTrack', { bookingId, requestId, propertyData })
           }
           activeOpacity={0.85}
         >
@@ -132,7 +121,7 @@ export default function PropertyResearchSuccessScreen({ navigation, route }) {
 
         <TouchableOpacity
           style={styles.tertiaryButton}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.navigate('ClientMain', { screen: 'Home' })}
           activeOpacity={0.7}
         >
           <Text style={styles.tertiaryButtonText}>Back to Home</Text>

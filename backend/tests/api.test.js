@@ -34,6 +34,26 @@ describe('Auth Routes', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('rejects the retired client-side registration secret', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        name: 'Test Client',
+        email: 'new-client@example.com',
+        password: 'StrongPass1!',
+        role: 'client',
+        captchaToken: 'mock_captcha_token',
+      });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects mock Google tokens unless explicitly enabled for development', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/google')
+      .send({ idToken: 'mock_test@example.com', role: 'client' });
+    expect(res.statusCode).toBe(401);
+  });
+
   it('POST /api/v1/auth/login - invalid credentials returns 401 or 500', async () => {
     const res = await request(app)
       .post('/api/v1/auth/login')
@@ -75,5 +95,4 @@ describe('404 Handling', () => {
     expect(res.statusCode).toBe(404);
   });
 });
-
 

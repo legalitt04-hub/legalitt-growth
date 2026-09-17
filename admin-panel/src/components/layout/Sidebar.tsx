@@ -91,9 +91,10 @@ interface SidebarProps {
   setIsOpen: (isOpen: boolean) => void;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
+  branding?: { primaryColor?: string; logoUrl?: string };
 }
 
-const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }: SidebarProps) => {
+const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed, branding }: SidebarProps) => {
   const { logout, user } = useAuth();
   const { canAccess, displayRole } = useRole();
   const navigate = useNavigate();
@@ -137,7 +138,7 @@ const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }: SidebarProp
           <div className="p-4 flex items-center justify-between shrink-0">
             <div className={cn("flex items-center gap-3", isCollapsed && "justify-center w-full")}>
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
-                <img src="/logo.png" alt="Legalitt" className="w-full h-full object-contain" />
+                <img src={branding?.logoUrl || '/logo.png'} alt="Legalitt" className="w-full h-full object-contain" />
               </div>
               {!isCollapsed && (
                 <motion.span 
@@ -145,7 +146,7 @@ const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }: SidebarProp
                   animate={{ opacity: 1 }}
                   className="text-xl font-bold text-slate-900 tracking-tight"
                 >
-                  Legal<span className="text-amber-500">itt</span>
+                  Legal<span className="brand-text">itt</span>
                 </motion.span>
               )}
             </div>
@@ -179,7 +180,7 @@ const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }: SidebarProp
                       "flex items-center gap-3 rounded-xl transition-all duration-200 group relative",
                       isCollapsed ? "px-3 py-3 justify-center" : "px-3 py-2.5",
                       isActive 
-                        ? "text-amber-700 bg-amber-500/10 font-semibold" 
+                        ? "brand-nav-active font-semibold"
                         : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                     )}
                   >
@@ -188,10 +189,10 @@ const Sidebar = ({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }: SidebarProp
                         {isActive && (
                           <motion.div 
                             layoutId="activeTab" 
-                            className="absolute left-0 top-0 w-1 h-full bg-amber-500 rounded-r-full"
+                            className="absolute left-0 top-0 w-1 h-full brand-bg rounded-r-full"
                           />
                         )}
-                        <item.icon className={cn("w-5 h-5 flex-shrink-0", isActive ? "text-amber-600" : "group-hover:text-amber-500 transition-colors")} />
+                        <item.icon className={cn("w-5 h-5 flex-shrink-0", isActive ? "brand-text" : "group-hover:text-amber-500 transition-colors")} />
                         {!isCollapsed && (
                           <span className="text-sm">{item.label}</span>
                         )}

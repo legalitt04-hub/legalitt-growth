@@ -45,9 +45,11 @@ export const connectSocket = (tokenOverride) => {
       socket = io(SOCKET_URL, {
         auth: { token },
         transports: ['websocket', 'polling'], // websocket FIRST for low latency
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1500,
-        timeout: 15000,
+        reconnectionAttempts: 15,             // More attempts for Render cold-starts
+        reconnectionDelay: 2000,              // Start with 2s delay
+        reconnectionDelayMax: 10000,          // Max 10s between attempts
+        randomizationFactor: 0.3,            // Add jitter to avoid thundering herd
+        timeout: 20000,                       // 20s timeout for Render cold-starts
       });
 
       socket.once('connect', () => {
@@ -56,10 +58,20 @@ export const connectSocket = (tokenOverride) => {
         resolve(socket);
       });
 
-      socket.once('connect_error', (err) => {
+      socket.on('connect_error', (err) => {
         console.log('[Socket] ❌ Error:', err.message);
+      });
+
+      socket.io.on('reconnect', (attempt) => {
+        console.log('[Socket] 🔄 Reconnected after', attempt, 'attempts');
         connectionPromise = null;
-        resolve(null); // Don't throw — caller handles null
+        resolve(socket);
+      });
+
+      socket.io.on('reconnect_failed', () => {
+        console.log('[Socket] ❌ All reconnection attempts failed');
+        connectionPromise = null;
+        resolve(null);
       });
 
       socket.on('disconnect', (reason) => console.log('[Socket] Disconnected:', reason));
@@ -84,6 +96,38 @@ export const getSocket = () => {
 };
 
 /**
+ * Start a call only after the server has validated the paid booking, recipient,
+ * busy state and secure call configuration. Prevents navigating into an empty
+ * room when the backend rejected the call.
+ */
+export const initiateCall = async (payload, timeoutMs = 12000) => {
+  const activeSocket = getSocket() || await Promise.race([
+    connectSocket(),
+    new Promise(resolve => setTimeout(() => resolve(null), 25000)),
+  ]);
+  if (!activeSocket?.connected) {
+    throw new Error('Could not connect to the call server. Please try again.');
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Call server did not respond. Please try again.'));
+    }, timeoutMs);
+
+    activeSocket.emit('initiate_call', payload, (result = {}) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (result.success) resolve(result);
+      else reject(new Error(result.message || 'The call could not be started.'));
+    });
+  });
+};
+
+/**
  * Disconnect and clear socket (call on logout)
  */
 export const disconnectSocket = () => {
@@ -92,6 +136,7 @@ export const disconnectSocket = () => {
     socket = null;
     console.log('[Socket] Disconnected');
   }
+  connectionPromise = null;
 };
 
-export default { connectSocket, getSocket, disconnectSocket };
+export default { connectSocket, getSocket, initiateCall, disconnectSocket };

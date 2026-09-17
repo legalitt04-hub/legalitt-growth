@@ -9,6 +9,10 @@ const Coupon = require('../models/Coupon');
 const AuditLog = require('../models/AuditLog');
 const Review = require('../models/Review');
 const User = require('../models/User');
+const Booking = require('../models/Booking');
+const Advocate = require('../models/Advocate');
+const Notification = require('../models/Notification');
+const { createNotification } = require('../utils/notificationHelper');
 const { AppError } = require('../middlewares/errorHandler');
 
 // ─── Cases ────────────────────────────────────────────────────────────────────
@@ -70,7 +74,7 @@ exports.getCases = async (req, res, next) => {
         status: b.status === 'confirmed' || b.status === 'pending_assignment' ? 'open' : b.status === 'in_progress' ? 'in_progress' : b.status === 'completed' ? 'resolved' : b.status === 'cancelled' ? 'closed' : 'pending',
         priority: b.priority || 'medium',
         payment: {
-          amount: b.payment?.amount || b.amount || 1499,
+          amount: b.payment?.amount ?? b.amount ?? 0,
           status: b.payment?.status || (b.paymentStatus === 'completed' ? 'paid' : 'pending'),
         },
         description: b.issue || b.issueDescription || b.notes || '',
@@ -151,8 +155,45 @@ exports.deleteCase = async (req, res, next) => {
 // ─── Services ─────────────────────────────────────────────────────────────────
 exports.getServices = async (req, res, next) => {
   try {
-    const services = await Service.find().lean().sort('-createdAt');
-    res.json({ success: true, data: services });
+    const [services, requestCounts] = await Promise.all([
+      Service.find().lean().sort('-createdAt'),
+      Booking.aggregate([{ $group: { _id: '$serviceType', count: { $sum: 1 } } }]),
+    ]);
+    const counts = Object.fromEntries(requestCounts.map(item => [item._id, item.count]));
+    const data = services.map(service => {
+      const normalized = String(service.name || '').trim().toLowerCase();
+      const serviceKey = normalized.includes('legal advice') ? 'legal_advice'
+        : normalized.includes('legal notice') ? 'legal_notice'
+        : normalized.includes('property research') ? 'property_research'
+        : normalized.includes('fir') ? 'fir_draft'
+        : normalized.includes('forensic') ? 'document_forensic'
+        : normalized.includes('consultation') ? 'consultation'
+        : normalized.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      return { ...service, totalRequests: counts[serviceKey] || 0 };
+    });
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.createService = async (req, res, next) => {
+  try {
+    const { name, description, type = 'Other', basePrice, estimatedDays = 1, category = 'General', requirements = [], isActive = true } = req.body;
+    if (!name?.trim() || !description?.trim() || basePrice === undefined) {
+      return next(new AppError('Name, description, and base price are required.', 400));
+    }
+    const service = await Service.create({
+      name: name.trim(),
+      description: description.trim(),
+      type,
+      basePrice: Number(basePrice),
+      estimatedDays: Number(estimatedDays),
+      category: category?.trim() || 'General',
+      requirements: Array.isArray(requirements) ? requirements : String(requirements).split(',').map(value => value.trim()).filter(Boolean),
+      isActive: Boolean(isActive),
+    });
+    res.status(201).json({ success: true, data: service });
   } catch (err) {
     next(err);
   }
@@ -455,12 +496,141 @@ exports.getNotificationTemplates = async (req, res, next) => {
   }
 };
 
+exports.getNotificationStats = async (req, res, next) => {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const [totalSent, sentToday, unread, activeTemplates] = await Promise.all([
+      Notification.countDocuments(),
+      Notification.countDocuments({ createdAt: { $gte: startOfToday } }),
+      Notification.countDocuments({ read: false }),
+      NotificationTemplate.countDocuments({ isActive: true }),
+    ]);
+    res.json({ success: true, data: { totalSent, sentToday, unread, activeTemplates } });
+  } catch (err) { next(err); }
+};
+
+exports.createNotificationTemplate = async (req, res, next) => {
+  try {
+    const template = await NotificationTemplate.create(req.body);
+    res.status(201).json({ success: true, data: template });
+  } catch (err) { next(err); }
+};
+
+exports.updateNotificationTemplate = async (req, res, next) => {
+  try {
+    const template = await NotificationTemplate.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true, runValidators: true });
+    if (!template) return next(new AppError('Notification template not found', 404));
+    res.json({ success: true, data: template });
+  } catch (err) { next(err); }
+};
+
+exports.deleteNotificationTemplate = async (req, res, next) => {
+  try {
+    const template = await NotificationTemplate.findByIdAndDelete(req.params.id);
+    if (!template) return next(new AppError('Notification template not found', 404));
+    res.json({ success: true, message: 'Notification template deleted' });
+  } catch (err) { next(err); }
+};
+
+exports.sendBroadcastNotification = async (req, res, next) => {
+  try {
+    const { title, message, targetAudience = 'all' } = req.body;
+    if (!title?.trim() || !message?.trim()) return next(new AppError('Title and message are required', 400));
+    const filter = { isActive: true };
+    if (targetAudience === 'clients') filter.role = 'client';
+    if (targetAudience === 'advocates') filter.role = 'advocate';
+    const users = await User.find(filter).select('_id').lean();
+    await Promise.all(users.map(user => createNotification({ recipientId: user._id, senderId: req.user._id, title: title.trim(), message: message.trim(), type: 'general' })));
+    res.status(201).json({ success: true, data: { recipients: users.length } });
+  } catch (err) { next(err); }
+};
+
+exports.getCalendarEvents = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = req.query.to ? new Date(req.query.to) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return next(new AppError('Invalid calendar date range', 400));
+    const [bookings, cases, advocates] = await Promise.all([
+      Booking.find({ date: { $gte: from, $lte: to }, status: { $ne: 'cancelled' } })
+        .select('date timeSlot consultationMode serviceType status client advocate')
+        .populate('client', 'name')
+        .populate({ path: 'advocate', populate: { path: 'user', select: 'name' } }).lean(),
+      Case.find({ 'timeline.date': { $gte: from, $lte: to } }).select('title courtName timeline advocate')
+        .populate({ path: 'advocate', populate: { path: 'user', select: 'name' } }).lean(),
+      Advocate.find({ 'courtHearings.hearingDate': { $gte: from, $lte: to } })
+        .select('courtHearings user').populate('user', 'name').lean(),
+    ]);
+    const bookingEvents = bookings.map(booking => ({
+      id: `booking-${booking._id}`, sourceId: booking._id, source: 'booking',
+      title: `${booking.serviceType?.replace(/_/g, ' ') || 'Consultation'} — ${booking.client?.name || 'Client'}`,
+      date: booking.date, startTime: booking.timeSlot?.startTime || '', endTime: booking.timeSlot?.endTime || '',
+      mode: booking.consultationMode || 'chat',
+      location: booking.consultationMode === 'in_person' ? 'In-person consultation' : `${booking.consultationMode || 'chat'} consultation`,
+      advocateName: booking.advocate?.user?.name || '', status: booking.status,
+    }));
+    const hearingEvents = cases.flatMap(caseItem => (caseItem.timeline || []).filter(item => item.date >= from && item.date <= to).map(item => ({
+      id: `case-${caseItem._id}-${item._id}`, sourceId: caseItem._id, source: 'case', title: `${caseItem.title}: ${item.title}`,
+      date: item.date, startTime: '', endTime: '', mode: 'hearing', location: caseItem.courtName || 'Court location not set',
+      advocateName: caseItem.advocate?.user?.name || '', status: item.status,
+    })));
+    const advocateHearingEvents = advocates.flatMap(advocate => (advocate.courtHearings || [])
+      .filter(item => item.hearingDate >= from && item.hearingDate <= to)
+      .map(item => ({
+        id: `advocate-hearing-${advocate._id}-${item._id}`,
+        sourceId: advocate._id,
+        source: 'advocate_hearing',
+        title: `${item.caseTitle} (${item.caseNumber})`,
+        date: item.hearingDate,
+        startTime: item.hearingTime || '',
+        endTime: '',
+        mode: 'hearing',
+        location: [item.courtName, item.courtLocation, item.courtroom].filter(Boolean).join(', '),
+        advocateName: advocate.user?.name || '',
+        status: String(item.status || 'Upcoming').toLowerCase(),
+      })));
+    res.json({ success: true, data: [...bookingEvents, ...hearingEvents, ...advocateHearingEvents].sort((a, b) => new Date(a.date) - new Date(b.date)) });
+  } catch (err) { next(err); }
+};
+
 // ─── AI Drafts ────────────────────────────────────────────────────────────────
 exports.getAIDrafts = async (req, res, next) => {
   try {
-    const drafts = await FIRDraft.find().lean()
-      .populate('user', 'name')
-      .sort('-createdAt');
+    const [firDrafts, bookingDrafts] = await Promise.all([
+      FIRDraft.find({ aiDraft: { $exists: true, $nin: [null, ''] } })
+        .populate('user', 'name email')
+        .sort('-updatedAt')
+        .lean(),
+      Booking.find({ aiDraft: { $exists: true, $nin: [null, ''] } })
+        .populate('client', 'name email')
+        .sort('-updatedAt')
+        .lean(),
+    ]);
+    const normalizedFIRDrafts = firDrafts.map(draft => ({
+      _id: draft._id,
+      source: 'fir_draft',
+      title: `${String(draft.type || 'FIR').replace(/_/g, ' ')} FIR Draft`,
+      content: draft.aiDraft,
+      summary: draft.incident?.description || '',
+      status: draft.status,
+      user: draft.user,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+    }));
+    const normalizedBookingDrafts = bookingDrafts.map(booking => ({
+      _id: booking._id,
+      source: booking.serviceType || 'legal_request',
+      title: `${String(booking.serviceType || 'Legal').replace(/_/g, ' ')} AI Draft`,
+      content: booking.aiDraft,
+      summary: booking.issueDescription || booking.issue || '',
+      status: booking.status,
+      user: booking.client,
+      createdAt: booking.createdAt,
+      updatedAt: booking.updatedAt,
+    }));
+    const drafts = [...normalizedFIRDrafts, ...normalizedBookingDrafts]
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
     res.json({ success: true, data: drafts });
   } catch (err) {
     next(err);
@@ -534,8 +704,9 @@ exports.deleteCoupon = async (req, res, next) => {
 exports.getReviews = async (req, res, next) => {
   try {
     const reviews = await Review.find().lean()
-      .populate('user', 'name avatar')
-      .populate('advocate', 'name')
+      .populate('client', 'name email avatar')
+      .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
+      .populate('booking', 'bookingId serviceType')
       .sort('-createdAt');
     res.json({ success: true, data: reviews });
   } catch (err) { next(err); }
@@ -543,7 +714,17 @@ exports.getReviews = async (req, res, next) => {
 
 exports.deleteReview = async (req, res, next) => {
   try {
-    await Review.findByIdAndDelete(req.params.id);
+    const review = await Review.findByIdAndDelete(req.params.id);
+    if (!review) return next(new AppError('Review not found', 404));
+    const stats = await Review.aggregate([
+      { $match: { advocate: review.advocate, isVerified: true } },
+      { $group: { _id: '$advocate', average: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
+    const Advocate = require('../models/Advocate');
+    await Advocate.findByIdAndUpdate(review.advocate, {
+      'rating.average': stats.length ? Math.round(stats[0].average * 10) / 10 : 0,
+      'rating.count': stats[0]?.count || 0,
+    });
     res.json({ success: true, message: 'Review deleted' });
   } catch (err) { next(err); }
 };
@@ -575,23 +756,35 @@ exports.getAdmins = async (req, res, next) => {
 };
 
 // ─── FIR Drafts Admin ─────────────────────────────────────────────────────────
+const toAdminFIRStatus = (status) => ({
+  draft: 'pending', finalized: 'in_progress', submitted: 'open', reviewed: 'in_progress',
+  pending_assignment: 'pending', pending: 'pending', confirmed: 'open', in_progress: 'in_progress',
+  completed: 'resolved', cancelled: 'closed',
+}[status] || 'pending');
+
 exports.getFIRDrafts = async (req, res, next) => {
   try {
     const FIRDraft = require('../models/FIRDraft');
-    const drafts = await FIRDraft.find().lean()
-      .populate('user', 'name email phone')
-      .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
-      .sort({ createdAt: -1 });
-      
-    // Map to Case-like interface
-    const mapped = drafts.map(d => ({
+    const Booking = require('../models/Booking');
+    const [drafts, bookings] = await Promise.all([
+      FIRDraft.find()
+        .populate('user', 'name email phone')
+        .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
+        .lean(),
+      Booking.find({ serviceType: 'fir_draft' })
+        .populate('client', 'name email phone')
+        .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
+        .lean(),
+    ]);
+
+    const mappedDrafts = drafts.map(d => ({
       _id: d._id,
       caseNumber: `FIR-${d._id.toString().slice(-6).toUpperCase()}`,
       title: d.type ? d.type.toUpperCase() + ' FIR' : 'General FIR',
       client: d.user || {},
       user: d.user, // for backward compat
       advocate: d.advocate,
-      status: d.status || 'draft',
+      status: toAdminFIRStatus(d.status),
       serviceType: 'fir_draft',
       priority: 'medium',
       payment: null,
@@ -609,7 +802,39 @@ exports.getFIRDrafts = async (req, res, next) => {
       incidentDate: d.incident?.date || ''
     }));
 
-    res.json({ success: true, data: mapped });
+    const mappedBookings = bookings.map(b => ({
+      _id: b._id,
+      caseNumber: b.bookingId || `FIR-${b._id.toString().slice(-6).toUpperCase()}`,
+      title: 'FIR Draft Assistance',
+      client: b.client || {},
+      user: b.client,
+      advocate: b.advocate || null,
+      status: toAdminFIRStatus(b.status),
+      serviceType: 'fir_draft',
+      priority: b.priority || 'medium',
+      payment: b.payment || null,
+      description: b.issue || '',
+      notes: b.adminNotes || b.notes || '',
+      documents: b.documents || [],
+      adminDocuments: b.adminDocuments || [],
+      advocateDocuments: b.advocateDocuments || [],
+      createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+    }));
+
+    let mapped = [...mappedDrafts, ...mappedBookings].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const search = String(req.query.search || '').trim().toLowerCase();
+    if (search) {
+      mapped = mapped.filter(item => [item.caseNumber, item.title, item.client?.name, item.client?.email, item.description]
+        .some(value => String(value || '').toLowerCase().includes(search)));
+    }
+    if (req.query.status) mapped = mapped.filter(item => item.status === req.query.status);
+    const total = mapped.length;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 15));
+    mapped = mapped.slice((page - 1) * limit, page * limit);
+
+    res.json({ success: true, data: mapped, pagination: { total, page, pages: Math.max(1, Math.ceil(total / limit)) } });
   } catch (err) { next(err); }
 };
 
@@ -617,15 +842,20 @@ exports.getFIRDraft = async (req, res, next) => {
   try {
     const FIRDraft = require('../models/FIRDraft');
     const draft = await FIRDraft.findById(req.params.id).populate('user', 'name email phone');
-    if (!draft) return res.status(404).json({ success: false, message: 'FIR Draft not found' });
-    res.json({ success: true, data: draft });
+    if (draft) return res.json({ success: true, data: draft });
+    const Booking = require('../models/Booking');
+    const booking = await Booking.findOne({ _id: req.params.id, serviceType: 'fir_draft' }).populate('client', 'name email phone');
+    if (!booking) return res.status(404).json({ success: false, message: 'FIR Draft not found' });
+    res.json({ success: true, data: booking });
   } catch (err) { next(err); }
 };
 
 exports.updateFIRDraftStatus = async (req, res, next) => {
   try {
     const FIRDraft = require('../models/FIRDraft');
-    const updateData = { status: req.body.status };
+    const Booking = require('../models/Booking');
+    const firStatus = ({ pending: 'draft', open: 'submitted', in_progress: 'reviewed', resolved: 'completed', closed: 'completed' })[req.body.status] || req.body.status;
+    const updateData = { status: firStatus };
     if (req.body.advocateId !== undefined) {
       updateData.advocate = req.body.advocateId === null ? null : req.body.advocateId;
     }
@@ -634,8 +864,19 @@ exports.updateFIRDraftStatus = async (req, res, next) => {
       updateData,
       { new: true }
     );
-    if (!draft) return res.status(404).json({ success: false, message: 'FIR Draft not found' });
-    res.json({ success: true, data: draft });
+    if (draft) return res.json({ success: true, data: draft });
+
+    const bookingStatus = ({ pending: 'pending_assignment', open: 'confirmed', in_progress: 'in_progress', resolved: 'completed', closed: 'cancelled' })[req.body.status] || req.body.status;
+    const bookingUpdate = { status: bookingStatus };
+    if (req.body.advocateId !== undefined) bookingUpdate.advocate = req.body.advocateId || null;
+    if (req.body.notes !== undefined) bookingUpdate.adminNotes = req.body.notes;
+    if (req.body.priority !== undefined) bookingUpdate.priority = req.body.priority;
+    if (req.body.paymentStatus !== undefined) bookingUpdate['payment.status'] = req.body.paymentStatus;
+    const booking = await Booking.findOneAndUpdate(
+      { _id: req.params.id, serviceType: 'fir_draft' }, bookingUpdate, { new: true }
+    );
+    if (!booking) return res.status(404).json({ success: false, message: 'FIR Draft not found' });
+    res.json({ success: true, data: booking });
   } catch (err) { next(err); }
 };
 
@@ -644,6 +885,7 @@ exports.uploadFIRDraftDocument = async (req, res, next) => {
     const cloudinary = require('cloudinary').v2;
     const fs = require('fs');
     const FIRDraft = require('../models/FIRDraft');
+    const Booking = require('../models/Booking');
 
     cloudinary.config({
       cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -677,10 +919,16 @@ exports.uploadFIRDraftDocument = async (req, res, next) => {
     const side = req.body.side || 'admin';
     const docEntry = { url, name: req.file.originalname };
     
-    if (side === 'advocate') {
-      await FIRDraft.findByIdAndUpdate(req.params.id, { $push: { advocateDocuments: docEntry } });
+    const draft = await FIRDraft.findById(req.params.id).select('_id').lean();
+    const field = side === 'advocate' ? 'advocateDocuments' : side === 'client' ? 'evidence' : 'adminDocuments';
+    if (draft) {
+      await FIRDraft.findByIdAndUpdate(req.params.id, { $push: { [field]: docEntry } });
     } else {
-      await FIRDraft.findByIdAndUpdate(req.params.id, { $push: { adminDocuments: docEntry } });
+      const bookingField = side === 'advocate' ? 'advocateDocuments' : side === 'client' ? 'documents' : 'adminDocuments';
+      const updated = await Booking.findOneAndUpdate(
+        { _id: req.params.id, serviceType: 'fir_draft' }, { $push: { [bookingField]: docEntry } }
+      );
+      if (!updated) return res.status(404).json({ success: false, message: 'FIR Draft not found' });
     }
 
     res.json({ success: true, data: { url: result.secure_url, name: req.file.originalname } });
@@ -695,7 +943,11 @@ exports.deleteFIRDraft = async (req, res, next) => {
   try {
     const FIRDraft = require('../models/FIRDraft');
     const draft = await FIRDraft.findByIdAndDelete(req.params.id);
-    if (!draft) return res.status(404).json({ success: false, message: 'FIR Draft not found.' });
+    if (!draft) {
+      const Booking = require('../models/Booking');
+      const booking = await Booking.findOneAndDelete({ _id: req.params.id, serviceType: 'fir_draft' });
+      if (!booking) return res.status(404).json({ success: false, message: 'FIR Draft not found.' });
+    }
     res.json({ success: true, message: 'FIR Draft deleted successfully.' });
   } catch (err) {
     next(err);
@@ -706,7 +958,7 @@ exports.deleteFIRDraft = async (req, res, next) => {
 exports.getPropertyResearch = async (req, res, next) => {
   try {
     const Booking = require('../models/Booking');
-    const requests = await Booking.find({ serviceType: 'property_research' }).lean()
+    const requests = await Booking.find({ serviceType: 'property_research', archivedAt: { $exists: false } }).lean()
       .populate('client', 'name email phone')
       .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
       .sort({ createdAt: -1 });
@@ -727,7 +979,12 @@ exports.getPropertyResearch = async (req, res, next) => {
         state: meta.state || b.state || '—',
         purpose: meta.purpose || b.purpose || b.issueDescription || '—',
         advocate: b.advocate,
-        status: b.status === 'pending_assignment' ? 'pending' : b.status === 'confirmed' ? 'processing' : b.status === 'completed' ? 'completed' : b.status === 'cancelled' ? 'rejected' : b.status || 'pending',
+        status: b.status === 'pending_assignment' ? 'open'
+              : b.status === 'pending' ? 'pending'
+              : ['confirmed', 'in_progress'].includes(b.status) ? 'in_progress'
+              : b.status === 'completed' ? 'resolved'
+              : b.status === 'cancelled' ? 'closed'
+              : 'open',
         payment: b.payment || (b.amount ? { amount: b.amount, status: b.paymentStatus === 'completed' ? 'paid' : 'pending' } : null),
         documents: b.documents || [],
         adminDocuments: b.adminDocuments || [],
@@ -745,7 +1002,10 @@ exports.getPropertyResearch = async (req, res, next) => {
 exports.updatePropertyResearchStatus = async (req, res, next) => {
   try {
     const Booking = require('../models/Booking');
-    const updateData = { status: req.body.status };
+    const STATUS_MAP = { open: 'pending_assignment', pending: 'pending', in_progress: 'in_progress', resolved: 'completed', closed: 'cancelled' };
+    const updateData = {};
+    if (req.body.status) updateData.status = STATUS_MAP[req.body.status] || req.body.status;
+    if (req.body.notes !== undefined) updateData.adminNotes = String(req.body.notes).slice(0, 5000);
     if (req.body.advocateId !== undefined) {
       updateData.advocate = req.body.advocateId === null ? null : req.body.advocateId;
     }
@@ -756,6 +1016,19 @@ exports.updatePropertyResearchStatus = async (req, res, next) => {
     ).populate('client', 'name email phone');
     if (!updated) return res.status(404).json({ success: false, message: 'Request not found' });
     res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+};
+
+exports.archivePropertyResearch = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const archived = await Booking.findOneAndUpdate(
+      { _id: req.params.id, serviceType: 'property_research' },
+      { $set: { archivedAt: new Date(), archivedBy: req.user._id } },
+      { new: true }
+    );
+    if (!archived) return res.status(404).json({ success: false, message: 'Request not found' });
+    res.json({ success: true, message: 'Property research request archived.' });
   } catch (err) { next(err); }
 };
 
@@ -815,6 +1088,7 @@ exports.getDocumentForensic = async (req, res, next) => {
   try {
     const Booking = require('../models/Booking');
     const requests = await Booking.find({
+      archivedAt: { $exists: false },
       $or: [
         { serviceType: 'document_forensic' },
         { serviceType: 'forensic' },
@@ -824,14 +1098,27 @@ exports.getDocumentForensic = async (req, res, next) => {
       .populate('client', 'name email phone')
       .populate({ path: 'advocate', populate: { path: 'user', select: 'name email avatar' } })
       .sort({ createdAt: -1 });
-    res.json({ success: true, data: requests });
+    const mapped = requests.map(b => ({
+      ...b,
+      status: b.status === 'pending_assignment' ? 'open'
+            : b.status === 'pending' ? 'pending'
+            : ['confirmed', 'in_progress'].includes(b.status) ? 'in_progress'
+            : b.status === 'completed' ? 'resolved'
+            : b.status === 'cancelled' ? 'closed'
+            : 'open',
+      notes: b.adminNotes || b.notes || '',
+    }));
+    res.json({ success: true, data: mapped });
   } catch (err) { next(err); }
 };
 
 exports.updateDocumentForensicStatus = async (req, res, next) => {
   try {
     const Booking = require('../models/Booking');
-    const updateData = { status: req.body.status };
+    const STATUS_MAP = { open: 'pending_assignment', pending: 'pending', in_progress: 'in_progress', resolved: 'completed', closed: 'cancelled' };
+    const updateData = {};
+    if (req.body.status) updateData.status = STATUS_MAP[req.body.status] || req.body.status;
+    if (req.body.notes !== undefined) updateData.adminNotes = String(req.body.notes).slice(0, 5000);
     if (req.body.advocateId !== undefined) {
       updateData.advocate = req.body.advocateId === null ? null : req.body.advocateId;
     }
@@ -842,6 +1129,19 @@ exports.updateDocumentForensicStatus = async (req, res, next) => {
     ).populate('client', 'name email phone');
     if (!updated) return res.status(404).json({ success: false, message: 'Request not found' });
     res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+};
+
+exports.archiveDocumentForensic = async (req, res, next) => {
+  try {
+    const Booking = require('../models/Booking');
+    const archived = await Booking.findOneAndUpdate(
+      { _id: req.params.id, serviceType: { $in: ['document_forensic', 'forensic'] } },
+      { $set: { archivedAt: new Date(), archivedBy: req.user._id } },
+      { new: true }
+    );
+    if (!archived) return res.status(404).json({ success: false, message: 'Request not found' });
+    res.json({ success: true, message: 'Document forensic request archived.' });
   } catch (err) { next(err); }
 };
 
@@ -1097,4 +1397,3 @@ exports.deleteLegalNotice = async (req, res, next) => {
     res.json({ success: true, message: 'Legal notice deleted.' });
   } catch (err) { next(err); }
 };
-

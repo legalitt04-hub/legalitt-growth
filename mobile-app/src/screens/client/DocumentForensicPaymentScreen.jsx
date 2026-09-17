@@ -11,9 +11,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { legalAdviceAPI } from '../../services/api';
+import { legalAdviceAPI, paymentAPI, uploadAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { usePricing } from '../../context/PricingContext';
+import RazorpayCheckout from 'react-native-razorpay';
 
 // ─── COLOR PALETTE ─────────────────────────────────────────────────────────────
 const PALETTE = {
@@ -57,13 +58,16 @@ const PAYMENT_METHODS = [
 export default function DocumentForensicPaymentScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { document, documentType, additionalNotes } = route?.params || {};
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { getPrice } = usePricing();
 
   const [selectedMethod, setSelectedMethod] = useState('upi');
   const [processing, setProcessing] = useState(false);
 
-  const totalPrice = getPrice('document_forensic', 2999) + Math.round(getPrice('document_forensic', 2999) * 0.18) + 199;
+  const totalPrice = getPrice('document_forensic', 2999);
+  const platformFee = 199;
+  const taxableAmount = Math.max(0, Math.round((totalPrice - platformFee) / 1.18));
+  const gstAmount = totalPrice - platformFee - taxableAmount;
 
   const handlePayAndStart = async () => {
     // Auth gate
@@ -80,56 +84,76 @@ export default function DocumentForensicPaymentScreen({ navigation, route }) {
     }
 
     setProcessing(true);
-    const generatedRequestId = '#DF-' + Math.floor(100000 + Math.random() * 900000);
-
     try {
-      // Step 1: Upload document to server so admin can view it
-      let uploadedDocs = [];
-      if (document?.uri) {
-        try {
-          const { api } = require('../../services/api');
-          const formData = new FormData();
-          formData.append('file', {
-            uri: document.uri,
-            name: document.name || 'forensic_document',
-            type: document.mimeType || 'application/octet-stream',
-          });
-          const uploadRes = await api.post('/upload', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-          if (uploadRes.data?.data?.url || uploadRes.data?.url) {
-            const url = uploadRes.data?.data?.url || uploadRes.data?.url;
-            uploadedDocs = [{ url, name: document.name || 'Forensic Document', type: document.mimeType || 'document' }];
-          }
-        } catch (uploadErr) {
-          console.log('Document upload skipped:', uploadErr?.message);
-          // Store local name at least so admin sees document name
-          uploadedDocs = [{ url: '', name: document.name || 'Forensic Document', type: document.mimeType || 'document' }];
-        }
+      if (!document?.uri) {
+        throw new Error('Please select a document before continuing.');
       }
 
-      // Step 2: Create booking with document info
-      await legalAdviceAPI.createRequest({
+      const uploadRes = await uploadAPI.uploadFile(
+        document.uri,
+        document.name || 'forensic_document',
+        document.mimeType || 'application/octet-stream'
+      );
+      const uploaded = uploadRes.data?.data;
+      if (!uploaded?.url) throw new Error('The document upload did not complete.');
+
+      const bookingRes = await legalAdviceAPI.createRequest({
         serviceType: 'document_forensic',
         consultationMode: 'chat',
         issueDescription: `[forensic] Document Forensic Analysis Request\nDocument: ${document?.name || 'N/A'}\nType: ${documentType || 'N/A'}\nNotes: ${additionalNotes || 'None'}`,
         issueCategory: 'forensic',
-        amount: totalPrice,
         documentName: document?.name,
         documentType,
-        documents: uploadedDocs,
-        requestId: generatedRequestId,
+        documents: [{
+          url: uploaded.url,
+          name: uploaded.name || document.name || 'Forensic Document',
+          type: document.mimeType || 'document',
+        }],
       });
-    } catch (err) {
-      console.log('Forensic request error:', err?.response?.data?.message || err?.message);
-    } finally {
-      setProcessing(false);
+
+      const { bookingId, amount: bookingAmount } = bookingRes.data.data;
+      const orderRes = await paymentAPI.createOrder(bookingId);
+      const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
+
+      const paymentData = await RazorpayCheckout.open({
+        description: 'Document Forensic Analysis',
+        currency: currency || 'INR',
+        key: keyId,
+        amount: orderAmount,
+        name: 'Legalitt',
+        order_id: orderId,
+        prefill: {
+          name: user?.name || '',
+          email: user?.email || '',
+          contact: user?.phone || '',
+        },
+        theme: { color: PALETTE.primaryButton },
+      });
+
+      await legalAdviceAPI.confirmPayment({
+        bookingId,
+        razorpayOrderId: paymentData.razorpay_order_id,
+        razorpayPaymentId: paymentData.razorpay_payment_id,
+        razorpaySignature: paymentData.razorpay_signature,
+      });
+
       navigation.navigate('DocumentForensicSuccess', {
-        requestId: generatedRequestId,
+        requestId: `#DF-${bookingId.slice(-6).toUpperCase()}`,
+        bookingId,
         document,
         documentType,
-        totalAmount: `₹${totalPrice}/-`,
+        totalAmount: `₹${bookingAmount}/-`,
       });
+    } catch (err) {
+      if (err?.code === 'PAYMENT_CANCELLED' || err?.code === 2 || err?.description?.toLowerCase?.().includes('cancel')) {
+        Alert.alert('Payment Cancelled', 'Your payment was not completed. You can try again when ready.');
+      } else {
+        const message = err?.response?.data?.message || err?.message || 'Could not submit your request.';
+        console.log('Forensic request error:', message);
+        Alert.alert('Request Not Completed', message);
+      }
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -189,17 +213,17 @@ export default function DocumentForensicPaymentScreen({ navigation, route }) {
 
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>Service Fee</Text>
-            <Text style={styles.priceValue}>₹{getPrice('document_forensic', 2999)}/-</Text>
+            <Text style={styles.priceValue}>₹{taxableAmount}/-</Text>
           </View>
 
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>GST (18%)</Text>
-            <Text style={styles.priceValue}>₹{Math.round(getPrice('document_forensic', 2999) * 0.18)}/-</Text>
+            <Text style={styles.priceValue}>₹{gstAmount}/-</Text>
           </View>
 
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>Platform fee</Text>
-            <Text style={styles.priceValue}>₹199/-</Text>
+            <Text style={styles.priceValue}>₹{platformFee}/-</Text>
           </View>
 
           <View style={styles.priceDivider} />

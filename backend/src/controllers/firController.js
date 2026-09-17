@@ -139,9 +139,27 @@ exports.getDraft = async (req, res, next) => {
 // Update Draft
 exports.updateDraft = async (req, res, next) => {
   try {
+    const update = {};
+    if (req.body.aiDraft !== undefined) {
+      const aiDraft = String(req.body.aiDraft).trim();
+      if (aiDraft.length < 20 || aiDraft.length > 20000) {
+        return next(new AppError('FIR draft must be between 20 and 20,000 characters.', 400));
+      }
+      update.aiDraft = aiDraft;
+    }
+    if (req.body.status !== undefined) {
+      if (!['draft', 'finalized'].includes(req.body.status)) {
+        return next(new AppError('Clients can only save or finalize their FIR draft.', 400));
+      }
+      update.status = req.body.status;
+    }
+    if (!Object.keys(update).length) {
+      return next(new AppError('No editable FIR draft fields were provided.', 400));
+    }
+
     const draft = await FIRDraft.findOneAndUpdate(
       { _id: req.params.id, user: req.user.id },
-      req.body,
+      { $set: update },
       { new: true, runValidators: true }
     );
     if (!draft) return next(new AppError('Draft not found', 404));

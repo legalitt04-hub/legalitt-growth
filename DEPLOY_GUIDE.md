@@ -106,11 +106,11 @@ Get your connection string:
 3. Click "Drivers"
 4. Driver: Node.js, Version: 5.5 or later
 5. Copy the connection string — looks like:
-   mongodb+srv://legalitt_admin:<password>@legalitt-prod.xxxxx.mongodb.net/
+   mongodb+srv://YOUR_USERNAME@YOUR_CLUSTER/YOUR_DATABASE
 
 6. Replace <password> with your saved password
 7. Add database name before the ?:
-   mongodb+srv://legalitt_admin:YOURPASS@legalitt-prod.xxxxx.mongodb.net/legalitt?retryWrites=true&w=majority
+   mongodb+srv://YOUR_USERNAME@YOUR_CLUSTER/YOUR_DATABASE
 
 SAVE THIS: The full connection string with your password
 
@@ -361,6 +361,8 @@ Fill in every value:
   JWT_EXPIRES_IN=15m
   JWT_REFRESH_EXPIRES_IN=7d
   GOOGLE_CLIENT_ID=<your Google Client ID from Step 5>
+  RESEND_API_KEY=<your Resend API key>
+  RESEND_FROM=Legalitt <verify@your-verified-domain.com>
   CLOUDINARY_CLOUD_NAME=<from Step 6>
   CLOUDINARY_API_KEY=<from Step 6>
   CLOUDINARY_API_SECRET=<from Step 6>

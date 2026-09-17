@@ -8,6 +8,7 @@ const Booking = require("../models/Booking");
 const Advocate = require("../models/Advocate");
 const CallLog = require("../models/CallLog");
 const { sendPushNotification } = require("../utils/pushNotification");
+const { generateZegoToken } = require("../services/zegoService");
 
 let io;
 const recentSystemMessages = new Set();
@@ -63,8 +64,12 @@ const initSocket = async (server) => {
       const token = socket.handshake.auth.token;
       if (!token) return next(new Error("Authentication required"));
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.id;
-      socket.userRole = decoded.role;
+      const user = await User.findById(decoded.id).select('role isActive passwordChangedAt');
+      if (!user || !user.isActive || user.passwordChangedAfter?.(decoded.iat)) {
+        return next(new Error("Authentication expired"));
+      }
+      socket.userId = user._id.toString();
+      socket.userRole = user.role;
       next();
     } catch (err) {
       next(new Error("Invalid token"));
@@ -77,12 +82,25 @@ const initSocket = async (server) => {
   // Tracks users currently in an active ringing or connected call: userId -> peerUserId
   const busyUsers = new Map();
 
+  const resolveBookingParticipants = async (bookingId, emitterId) => {
+    if (!bookingId) return null;
+    const booking = await Booking.findById(bookingId).select('client advocate chat payment status').lean();
+    if (!booking) return null;
+    const advocate = booking.advocate
+      ? await Advocate.findById(booking.advocate).select('user').lean()
+      : null;
+    const clientId = booking.client?.toString();
+    const advocateUserId = advocate?.user?.toString();
+    if (![clientId, advocateUserId].includes(emitterId)) return null;
+    return { booking, clientId, advocateUserId, chatId: booking.chat?.toString() || null };
+  };
+
   io.on("connection", (socket) => {
     logger.info(`Socket connected: ${socket.userId} (${socket.userRole})`);
     // Every user joins their personal room
     socket.join(`user:${socket.userId}`);
     // Admin users also join admin_room for global notifications
-    if (socket.userRole === 'admin') {
+    if (['admin', 'super_admin', 'superadmin', 'support_executive', 'support'].includes(socket.userRole)) {
       socket.join('admin_room');
       logger.info(`Admin ${socket.userId} joined admin_room`);
     }
@@ -91,6 +109,15 @@ const initSocket = async (server) => {
     if (!onlineUsers.has(socket.userId)) onlineUsers.set(socket.userId, new Set());
     onlineUsers.get(socket.userId).add(socket.id);
     io.emit("user_online", { userId: socket.userId });
+
+    // Socket presence alone is not enough: mobile sockets can stay connected in
+    // the background. Track app visibility so background message pushes are not lost.
+    socket.data.appState = 'active';
+    socket.on('app_state', ({ state } = {}) => {
+      if (['active', 'background', 'inactive'].includes(state)) {
+        socket.data.appState = state;
+      }
+    });
 
     // ── JOIN CHAT ─────────────────────────────────────────────
     socket.on("join_chat", async ({ chatId }) => {
@@ -157,7 +184,12 @@ const initSocket = async (server) => {
         for (const pid of chat.participants) {
           if (pid.toString() === socket.userId) continue;
 
-          const isOnline = onlineUsers.has(pid.toString()) && onlineUsers.get(pid.toString()).size > 0;
+          const recipientSocketIds = onlineUsers.get(pid.toString()) || new Set();
+          const isActivelyViewingChat = [...recipientSocketIds].some((socketId) => {
+            const recipientSocket = io.sockets.sockets.get(socketId);
+            return recipientSocket?.data?.appState === 'active'
+              && recipientSocket.rooms.has(`chat:${chatId}`);
+          });
           
           // Always emit in-app notification
           io.to(`user:${pid}`).emit("message_notification", {
@@ -168,15 +200,17 @@ const initSocket = async (server) => {
             }
           });
 
-          // Push notification only if user is offline
-          if (!isOnline) {
+          // Push unless the recipient is actively looking at this exact chat.
+          // This also covers background apps whose socket has not disconnected yet.
+          if (!isActivelyViewingChat) {
             const recipient = await User.findById(pid).select('expoPushToken').lean();
             if (recipient?.expoPushToken) {
               await sendPushNotification(
                 recipient.expoPushToken,
                 `💬 ${senderName}`,
                 notifBody,
-                { chatId, type: 'new_message' }
+                { chatId, type: 'new_message' },
+                'messages'
               );
             }
           }
@@ -189,14 +223,21 @@ const initSocket = async (server) => {
     });
 
     // ── TYPING INDICATORS ─────────────────────────────────────
-    socket.on("typing", ({ chatId }) =>
-      socket.to(`chat:${chatId}`).emit("user_typing", { userId: socket.userId }));
-    socket.on("stop_typing", ({ chatId }) =>
-      socket.to(`chat:${chatId}`).emit("user_stopped_typing", { userId: socket.userId }));
+    const emitChatPresence = async (event, chatId) => {
+      try {
+        const chat = await Chat.findById(chatId).select('participants').lean();
+        if (!chat?.participants?.some(p => p.toString() === socket.userId)) return;
+        socket.to(`chat:${chatId}`).emit(event, { userId: socket.userId });
+      } catch (err) { logger.error(`${event}:`, err.message); }
+    };
+    socket.on("typing", ({ chatId }) => emitChatPresence('user_typing', chatId));
+    socket.on("stop_typing", ({ chatId }) => emitChatPresence('user_stopped_typing', chatId));
 
     // ── READ RECEIPTS ─────────────────────────────────────────
     socket.on("mark_read", async ({ chatId }) => {
       try {
+        const chat = await Chat.findById(chatId).select('participants').lean();
+        if (!chat?.participants?.some(p => p.toString() === socket.userId)) return;
         const result = await Message.updateMany(
           { chat: chatId, sender: { $ne: socket.userId }, readAt: null },
           { readAt: new Date() }
@@ -213,7 +254,10 @@ const initSocket = async (server) => {
 
     // ── CALL SIGNALING ─────────────────────────────────────────────────
     // Either client or advocate emits this when they tap "Video Call" / "Voice Call"
-    socket.on("initiate_call", async ({ bookingId, chatId, zegoRoomId, mode }) => {
+    socket.on("initiate_call", async ({ bookingId, chatId, zegoRoomId, mode }, acknowledge) => {
+      const reply = (payload) => {
+        if (typeof acknowledge === 'function') acknowledge(payload);
+      };
       try {
         let targetUserId;
         let callerUser;
@@ -221,37 +265,43 @@ const initSocket = async (server) => {
 
         if (bookingId) {
           const booking = await Booking.findById(bookingId)
-            .select('advocate client videoRoomId advocateVideoToken zegoAppId')
+            .select('advocate client videoRoomId zegoAppId payment status')
             .lean();
-          if (!booking) return;
+          if (!booking) return reply({ success: false, message: 'Booking not found.' });
+          if (booking.payment?.status !== 'paid' || ['cancelled', 'rejected'].includes(booking.status)) {
+            const payload = { success: false, bookingId, message: 'This consultation is not available for calls.' };
+            socket.emit('call_unavailable', payload);
+            return reply(payload);
+          }
 
           const advocate = await Advocate.findById(booking.advocate).lean();
-          if (!advocate?.user) return;
+          if (!advocate?.user) return reply({ success: false, message: 'No advocate is assigned to this consultation.' });
           const advocateUserId = advocate.user.toString();
 
           const isClientCalling = booking.client.toString() === socket.userId;
           const isAdvocateCalling = advocateUserId === socket.userId;
 
-          if (!isClientCalling && !isAdvocateCalling) return; // unauthorized
+          if (!isClientCalling && !isAdvocateCalling) {
+            return reply({ success: false, message: 'You are not authorized to start this call.' });
+          }
           targetUserId = isClientCalling ? advocateUserId : booking.client.toString();
           
           bookingDetails = {
             zegoRoomId: booking.videoRoomId,
-            advocateToken: booking.advocateVideoToken,
             zegoAppId: booking.zegoAppId,
             clientId: booking.client.toString(),
             advocateUserId: advocateUserId,
             isClientCalling,
           };
         } else if (chatId) {
-          // Fallback to chat participants if no booking ID
-          const chat = await Chat.findById(chatId).lean();
-          if (!chat) return;
-          if (!chat.participants.some(p => p.toString() === socket.userId)) return;
-          targetUserId = chat.participants.find(p => p.toString() !== socket.userId)?.toString();
-          if (!targetUserId) return;
+          const payload = {
+            success: false,
+            message: 'A paid booking is required to start a call.',
+          };
+          socket.emit('call_unavailable', payload);
+          return reply(payload);
         } else {
-          return;
+          return reply({ success: false, message: 'Booking is required to start a call.' });
         }
 
         callerUser = await User.findById(socket.userId).select('name avatar role').lean();
@@ -262,11 +312,8 @@ const initSocket = async (server) => {
             message: "User is currently busy on another call.",
             targetUserId 
           });
-          return;
+          return reply({ success: false, message: 'User is currently busy on another call.' });
         }
-
-        busyUsers.set(socket.userId, targetUserId);
-        busyUsers.set(targetUserId, socket.userId);
 
         // Determine client and advocate IDs based on roles if not already known
         let resolvedClientId = bookingDetails.clientId;
@@ -285,12 +332,26 @@ const initSocket = async (server) => {
 
         // Notify target — they will open IncomingCallScreen
         const callerName = callerUser?.name || (bookingDetails.isClientCalling ? 'Client' : 'Advocate');
+        const roomId = bookingDetails.zegoRoomId || zegoRoomId || (bookingId ? `legalitt-${bookingId}` : null);
+        let recipientToken = null;
+        if (roomId) {
+          try {
+            recipientToken = generateZegoToken(targetUserId, roomId, 7200);
+          } catch (tokenErr) {
+            logger.error(`[CALL] Token generation failed: ${tokenErr.message}`);
+            const payload = { success: false, bookingId, message: 'Secure call service is unavailable.' };
+            socket.emit('call_unavailable', payload);
+            return reply(payload);
+          }
+        }
+        busyUsers.set(socket.userId, targetUserId);
+        busyUsers.set(targetUserId, socket.userId);
         const callPayload = {
           bookingId:      bookingId || null,
           chatId:         chatId || null,
-          zegoRoomId:     bookingDetails.zegoRoomId || zegoRoomId,
-          advocateToken:  bookingDetails.advocateToken,
-          zegoAppId:      bookingDetails.zegoAppId || 0,
+          zegoRoomId:     roomId,
+          zegoToken:      recipientToken,
+          zegoAppId:      Number(process.env.ZEGO_APP_ID || bookingDetails.zegoAppId || 0),
           // Caller info — used by IncomingCallScreen to show name + avatar
           callerName,
           callerAvatar:   callerUser?.avatar || null,
@@ -301,6 +362,7 @@ const initSocket = async (server) => {
           clientId:       resolvedClientId,
           advocateUserId: resolvedAdvocateId,
           mode:           mode || 'video',
+          targetRoute:    targetUser?.role === 'advocate' ? 'AdvocateCall' : 'VideoCall',
         };
 
         io.to(`user:${targetUserId}`).emit("incoming_call", callPayload);
@@ -318,32 +380,22 @@ const initSocket = async (server) => {
         }
 
         logger.info(`[CALL] initiate_call: caller=${socket.userId} → target=${targetUserId} | booking=${bookingId}`);
+        reply({ success: true, bookingId, targetUserId });
 
         // Offline push notification block removed since it is now handled by the high-priority push block above.
       } catch (err) {
         logger.error("initiate_call error:", err.message);
+        reply({ success: false, message: 'Could not start the call. Please try again.' });
       }
     });
 
     // Either party can emit this to notify the other that call ended
     socket.on("call_ended", async ({ bookingId, clientId, advocateUserId }) => {
       try {
-        let finalClientId = clientId;
-        let finalAdvocateUserId = advocateUserId;
-
-        // If IDs are missing, fetch from booking
-        if (!finalClientId || !finalAdvocateUserId) {
-          if (bookingId) {
-            const booking = await Booking.findById(bookingId).lean();
-            if (booking) {
-              finalClientId = booking.client?.toString();
-              if (booking.advocate) {
-                const advocate = await Advocate.findById(booking.advocate).lean();
-                finalAdvocateUserId = advocate?.user?.toString();
-              }
-            }
-          }
-        }
+        const participants = await resolveBookingParticipants(bookingId, socket.userId);
+        if (!participants) return;
+        const finalClientId = participants.clientId;
+        const finalAdvocateUserId = participants.advocateUserId;
 
         if (finalClientId) busyUsers.delete(finalClientId);
         if (finalAdvocateUserId) busyUsers.delete(finalAdvocateUserId);
@@ -363,21 +415,10 @@ const initSocket = async (server) => {
     // ── CALL ACCEPTED ──────────────────────────────────────────────────
     socket.on("call_accepted", async ({ bookingId, clientId, advocateUserId }) => {
       try {
-        let finalClientId = clientId;
-        let finalAdvocateUserId = advocateUserId;
-
-        if (!finalClientId || !finalAdvocateUserId) {
-          if (bookingId) {
-            const booking = await Booking.findById(bookingId).lean();
-            if (booking) {
-              finalClientId = booking.client?.toString();
-              if (booking.advocate) {
-                const advocate = await Advocate.findById(booking.advocate).lean();
-                finalAdvocateUserId = advocate?.user?.toString();
-              }
-            }
-          }
-        }
+        const participants = await resolveBookingParticipants(bookingId, socket.userId);
+        if (!participants) return;
+        const finalClientId = participants.clientId;
+        const finalAdvocateUserId = participants.advocateUserId;
 
         // Note: we can't easily map them back to each other if we only have one ID here,
         // but normally they are already in the Map from initiate_call.
@@ -407,26 +448,13 @@ const initSocket = async (server) => {
     // ── MISSED CALL — fired when callee declines or IncomingCallScreen times out ──
     socket.on("call_missed", async ({ bookingId, clientId, advocateUserId, mode }) => {
       try {
-        if (clientId) busyUsers.delete(clientId);
-        if (advocateUserId) busyUsers.delete(advocateUserId);
-
-        let finalClientId = clientId;
-        let finalAdvocateId = advocateUserId;
-        let chatId = null;
-
-        if (bookingId) {
-          const booking = await Booking.findById(bookingId)
-            .select('advocate client chat')
-            .lean();
-          if (booking) {
-            finalClientId = finalClientId || booking.client?.toString();
-            if (!finalAdvocateId && booking.advocate) {
-              const adv = await Advocate.findById(booking.advocate).lean();
-              finalAdvocateId = adv?.user?.toString();
-            }
-            chatId = booking.chat?.toString() || null;
-          }
-        }
+        const participants = await resolveBookingParticipants(bookingId, socket.userId);
+        if (!participants) return;
+        const finalClientId = participants.clientId;
+        const finalAdvocateId = participants.advocateUserId;
+        let chatId = participants.chatId;
+        busyUsers.delete(finalClientId);
+        busyUsers.delete(finalAdvocateId);
 
         if (!chatId && finalClientId && finalAdvocateId) {
           const chat = await Chat.findOne({
@@ -512,24 +540,14 @@ const initSocket = async (server) => {
     // ── CALL COMPLETED ─────────────────────────────────────────
     socket.on("call_completed", async ({ bookingId, clientId, advocateUserId, mode, duration }) => {
       try {
-        if (clientId) busyUsers.delete(clientId);
-        if (advocateUserId) busyUsers.delete(advocateUserId);
-
-        let finalClientId = clientId;
-        let finalAdvocateId = advocateUserId;
-        let chatId = null;
-
-        if (bookingId) {
-          const booking = await Booking.findById(bookingId).select('advocate client chat').lean();
-          if (booking) {
-            finalClientId = finalClientId || booking.client?.toString();
-            if (!finalAdvocateId && booking.advocate) {
-              const adv = await Advocate.findById(booking.advocate).lean();
-              finalAdvocateId = adv?.user?.toString();
-            }
-            chatId = booking.chat?.toString() || null;
-          }
-        }
+        const participants = await resolveBookingParticipants(bookingId, socket.userId);
+        if (!participants || participants.booking.payment?.status !== 'paid') return;
+        const finalClientId = participants.clientId;
+        const finalAdvocateId = participants.advocateUserId;
+        let chatId = participants.chatId;
+        busyUsers.delete(finalClientId);
+        busyUsers.delete(finalAdvocateId);
+        duration = Math.max(0, Math.min(Number(duration) || 0, 4 * 60 * 60));
 
         if (!chatId && finalClientId && finalAdvocateId) {
           const chat = await Chat.findOne({ participants: { $all: [finalClientId, finalAdvocateId] } }).lean();

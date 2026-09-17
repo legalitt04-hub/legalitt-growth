@@ -52,18 +52,13 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleSocialLogin = async (provider) => {
+  const handleSocialLogin = async () => {
     if (!agreeToTerms) {
       setTermsError(true);
       Alert.alert(
         'Consent Required',
         'Please read and agree to the Terms & Conditions and Privacy Policy to continue.'
       );
-      return;
-    }
-
-    if (provider !== 'Google') {
-      Alert.alert('Social Login', `${provider} login will be implemented soon.`);
       return;
     }
 
@@ -302,6 +297,7 @@ export default function LoginScreen({ navigation }) {
           {/* Forgot Password */}
           <TouchableOpacity
             style={styles.forgotPassword}
+            onPress={() => navigation.navigate('ForgotPassword', { role: 'advocate' })}
             disabled={loading}
           >
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
@@ -342,31 +338,16 @@ export default function LoginScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
-          {/* Social Login Buttons */}
+          {/* Google Sign-In */}
           <View style={styles.socialContainer}>
             <TouchableOpacity
               style={styles.socialButton}
-              onPress={() => handleSocialLogin('Google')}
+              onPress={handleSocialLogin}
               disabled={loading}
             >
               <GoogleIcon />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.socialButton, styles.socialButtonFacebook]}
-              onPress={() => handleSocialLogin('Facebook')}
-              disabled={loading}
-            >
-              <FbIcon />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.socialButton, styles.socialButtonApple]}
-              onPress={() => handleSocialLogin('Apple')}
-              disabled={loading}
-            >
-              <AppleIcon />
-            </TouchableOpacity>
           </View>
 
 
@@ -699,14 +680,6 @@ const GoogleIcon = () => (
   </View>
 );
 
-const FbIcon = () => (
-  <Ionicons name="logo-facebook" size={24} color="#FFFFFF" />
-);
-
-const AppleIcon = () => (
-  <Ionicons name="logo-apple" size={24} color="#FFFFFF" />
-);
-
 // Simple SVG component wrapper (if react-native-svg is not installed, fallback to text)
 const Svg = ({ children, ...props }) => {
   try {
@@ -729,4 +702,3 @@ const Path = ({ ...props }) => {
     return null;
   }
 };
-

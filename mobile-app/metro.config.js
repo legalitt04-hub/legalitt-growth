@@ -7,7 +7,6 @@ const config = getDefaultConfig(__dirname);
 const NOOP       = path.resolve(__dirname, 'src/utils/polyfills/noopPolyfill.js');
 const RAZORPAY   = path.resolve(__dirname, 'src/utils/polyfills/razorpayPolyfill.js');
 const KEEP_AWAKE = path.resolve(__dirname, 'src/utils/keepAwakePolyfill.js');
-const GOOGLE_SIGNIN = path.resolve(__dirname, 'src/utils/GoogleSigninMock.js');
 
 // ─── Size Optimization: exclude web-only packages from Android bundle ─────────
 // These packages are only needed for web. Blocking them from Android/iOS
@@ -51,11 +50,6 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   }
 
   // ─── Expo Go / Dev: stub native TurboModules not present in Expo Go ──────
-
-  // Google Sign-In — only mock in Expo Go (NOT in EAS builds)
-  if (moduleName.includes('@react-native-google-signin/google-signin')) {
-    return { type: 'sourceFile', filePath: GOOGLE_SIGNIN };
-  }
 
   // KeepAwake
   if (moduleName === '@sayem314/react-native-keep-awake') {

@@ -14,7 +14,8 @@ const mockRes = {
 };
 
 async function run() {
-  await mongoose.connect('mongodb+srv://legalitt:Legalitt123@cluster0.zoxxx.mongodb.net/?retryWrites=true&w=majority', { dbName: 'legalitt' }); // I will just try to run it without DB connection actually, wait, it uses User and Advocate models
+  if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
+  await mongoose.connect(process.env.MONGODB_URI, { dbName: 'legalitt' });
   // Actually, I can mock User and Advocate
 }
 run();

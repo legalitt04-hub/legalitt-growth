@@ -20,11 +20,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
 });
 
 router.post('/generate', firRateLimiter, firController.generateFIR);
-router.get('/templates', (req, res) => res.json({ success: true, data: [] })); // FIR templates (placeholder)
 router.get('/my', firController.getMyDrafts);
 router.get('/:id', firController.getDraft);
 router.put('/:id', firController.updateDraft);
 router.delete('/:id', firController.deleteDraft);
 
 module.exports = router;
-

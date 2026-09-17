@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import api, { bookingAPI, legalAdviceAPI, firAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { getSocket } from '../../services/socket';
+import { getSocket, initiateCall } from '../../services/socket';
 import { COLORS } from '../../constants/theme';
 import { LEGAL_THEME } from '../../constants/legalAdviceTheme';
 import { usePricing } from '../../context/PricingContext';
@@ -404,26 +404,34 @@ export default function MyBookingsScreen({ navigation }) {
     if (actionType === 'chat') {
       navigation.navigate('Chat', params);
     } else if (actionType === 'call') {
-      // Notify advocate that client is starting a call
-      const { connectSocket } = require('../../services/socket');
-      const socket = getSocket() || await connectSocket();
-      if (socket && params.bookingId) {
-        socket.emit('initiate_call', {
+      try {
+        const { data } = await bookingAPI.canJoinCall(params.bookingId);
+        if (data?.canJoin === false) throw new Error(data.message || 'The call window is not open.');
+        const callConfig = data?.data || {};
+        await initiateCall({
           bookingId: params.bookingId,
-          zegoRoomId: params.zegoRoomId,
+          zegoRoomId: callConfig.zegoRoomId,
           mode: params.mode || 'video',
         });
-      } else {
-        Alert.alert('Error', 'Could not connect to call server.');
+        navigation.navigate('VideoCall', {
+          ...params,
+          ...callConfig,
+          zegoRoomId: callConfig.zegoRoomId,
+          zegoToken: callConfig.zegoToken,
+          zegoAppId: callConfig.zegoAppId,
+          myUserId: callConfig.myUserId || params.myUserId,
+          myUserName: callConfig.myUserName || params.myUserName,
+        });
+      } catch (err) {
+        Alert.alert('Call unavailable', err.response?.data?.message || err.message || 'Could not connect to the call server.');
       }
-      navigation.navigate('VideoCall', params);
     }
   };
 
   const getActionButtons = (item) => {
     const advocate = item.advocate?.user || {};
     const advocateName = advocate.name || 'Advocate';
-    const advocateAvatar = advocate.avatar || `https://i.pravatar.cc/150?u=${item.advocate?._id}`;
+    const advocateAvatar = advocate.avatar || null;
     const mode = item.consultationMode || item.type;
     const isConfirmed = item.status === 'confirmed' || item.status === 'in_progress';
 
@@ -583,9 +591,9 @@ export default function MyBookingsScreen({ navigation }) {
                   name: advocateName,
                   avatar: advocateAvatar,
                   specializations: advObj.specializations || [],
-                  experience: advObj.experience || 5,
+                  experience: advObj.experience || 0,
                   consultationFee: advObj.consultationFee || getPrice('chat_consultation', 999),
-                  rating: advObj.rating?.average || 4.9,
+                  rating: advObj.rating?.average || 0,
                   location: advObj.location,
                 } : null,
               });

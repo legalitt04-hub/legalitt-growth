@@ -2,11 +2,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, Easing, StatusBar, Image, Platform, ActivityIndicator
+  Animated, Easing, StatusBar, Image, Platform, ActivityIndicator, Alert
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getSocket } from '../../services/socket';
+import { connectSocket, getSocket } from '../../services/socket';
+import { bookingAPI } from '../../services/api';
 import { Audio } from 'expo-av';
 
 const AUTO_DECLINE_SECS = 35; // Auto-decline after 35s
@@ -44,7 +45,6 @@ export default function IncomingCallScreen({ navigation, route }) {
   const ring3 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Alert.alert('Debug', 'Incoming Call Screen Mounted! Call received.');
     const pulse = (anim, delay) =>
       Animated.loop(
         Animated.sequence([
@@ -90,16 +90,16 @@ export default function IncomingCallScreen({ navigation, route }) {
     let isMounted = true;
 
     const setupListener = async () => {
-      const { connectSocket } = require('../../services/socket');
       activeSocket = getSocket() || await connectSocket();
       
       if (!isMounted) return;
 
-      const onCallEnded = (data) => {
+      const onCallEnded = () => {
         // Caller hung up before we picked up
         if (soundRef.current) soundRef.current.stopAsync();
         if (navigation.canGoBack()) navigation.goBack();
       };
+      onCallEndedRef.current = onCallEnded;
       
       if (activeSocket) {
         activeSocket.on('call_ended', onCallEnded);
@@ -110,11 +110,7 @@ export default function IncomingCallScreen({ navigation, route }) {
 
     return () => {
       isMounted = false;
-      if (activeSocket) {
-        // We can't easily reference onCallEnded here since it's scoped,
-        // but we can remove all 'call_ended' listeners or just rely on the component unmounting.
-        activeSocket.off('call_ended');
-      }
+      if (activeSocket && onCallEndedRef.current) activeSocket.off('call_ended', onCallEndedRef.current);
     };
   }, [navigation]);
 
@@ -130,8 +126,7 @@ export default function IncomingCallScreen({ navigation, route }) {
           staysActiveInBackground: true,
         });
         const { sound } = await Audio.Sound.createAsync(
-          // Reliable public ringtone (Google Actions OGG + MP3 fallback)
-          { uri: 'https://www.soundjay.com/phone/sounds/telephone-ring-01a.mp3' },
+          require('../../../assets/incoming-call.wav'),
           { shouldPlay: true, isLooping: true, volume: 1.0 }
         );
         if (isMounted) {
@@ -157,11 +152,11 @@ export default function IncomingCallScreen({ navigation, route }) {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const [isAccepting, setIsAccepting] = useState(false);
+  const onCallEndedRef = useRef(null);
 
   const handleDecline = async () => {
     if (soundRef.current) await soundRef.current.stopAsync();
     try {
-      const { connectSocket } = require('../../services/socket');
       const socket = getSocket() || await connectSocket();
       if (socket) {
         socket.emit('call_ended', { bookingId, clientId, advocateUserId });
@@ -174,11 +169,25 @@ export default function IncomingCallScreen({ navigation, route }) {
   };
 
   const handleAccept = async () => {
+    if (isAccepting) return;
     setIsAccepting(true);
     if (soundRef.current) await soundRef.current.stopAsync();
-    
+
+    let callConfig = { zegoRoomId, zegoToken, zegoAppId };
     try {
-      const { connectSocket } = require('../../services/socket');
+      if (bookingId) {
+        const response = await bookingAPI.canJoinCall(bookingId);
+        const payload = response?.data;
+        if (payload?.canJoin === false) {
+          throw new Error(payload.message || 'This call is not available right now.');
+        }
+        callConfig = { ...callConfig, ...(payload?.data || {}) };
+      }
+
+      if (!callConfig.zegoRoomId || !callConfig.zegoToken || !Number(callConfig.zegoAppId)) {
+        throw new Error('Secure call credentials are unavailable. Please try again.');
+      }
+
       const socket = getSocket() || await connectSocket();
       if (socket) {
         socket.emit('call_accepted', { bookingId, clientId, advocateUserId });
@@ -186,13 +195,16 @@ export default function IncomingCallScreen({ navigation, route }) {
         console.warn('[IncomingCall] Failed to get socket for call_accepted');
       }
     } catch (err) {
-      console.warn('Accept emit failed:', err);
+      console.warn('Accept call failed:', err);
+      Alert.alert('Unable to join call', err?.message || 'Please try again.');
+      setIsAccepting(false);
+      return;
     }
 
     navigation.replace(targetRoute, {
-      zegoRoomId,
-      zegoToken,
-      zegoAppId,
+      zegoRoomId: callConfig.zegoRoomId,
+      zegoToken: callConfig.zegoToken,
+      zegoAppId: callConfig.zegoAppId,
       mode,
       bookingId,
       clientName:     callerName,
@@ -202,8 +214,8 @@ export default function IncomingCallScreen({ navigation, route }) {
       advocateAvatar: callerPhoto,
       clientId,
       advocateUserId,
-      myUserId:   myUserId || '',
-      myUserName: myUserName || 'Me',
+      myUserId:   callConfig.myUserId || myUserId || '',
+      myUserName: callConfig.myUserName || myUserName || 'Me',
     });
   };
 

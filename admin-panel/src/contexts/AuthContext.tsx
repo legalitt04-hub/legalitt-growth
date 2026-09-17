@@ -8,8 +8,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   admin:                 ['dashboard','users','advocates','cases','consultations','earnings','withdrawals','support','reviews','reports','notifications'],
   support_executive:     ['dashboard','consultations','support','notifications'],
   accounts:              ['dashboard','earnings','withdrawals','reports'],
-  forensic_expert:       ['dashboard','cases','documents'],
-  property_verification: ['dashboard','cases','documents'],
+  forensic_expert:       ['dashboard','documents','document_forensic'],
+  property_verification: ['dashboard','documents','property_research'],
 };
 
 // Map permission key → allowed paths
@@ -17,11 +17,11 @@ const PERMISSION_PATH_MAP: Record<string, string[]> = {
   dashboard:     ['/'],
   users:         ['/users'],
   advocates:     ['/advocates', '/pending-advocates', '/verification'],
-  cases:         ['/cases'],
-  consultations: ['/consultations', '/chats', '/calendar'],
+  cases:         ['/cases', '/fir-drafts', '/legal-notices'],
+  consultations: ['/consultations', '/chats', '/calendar', '/call-history'],
   ads:           ['/ads'],
   roles:         ['/roles', '/admins'],
-  earnings:      ['/earnings', '/coupons'],
+  earnings:      ['/earnings', '/coupons', '/payment-history', '/transactions', '/pricing'],
   withdrawals:   ['/withdrawals'],
   settings:      ['/settings'],
   support:       ['/support'],
@@ -30,6 +30,8 @@ const PERMISSION_PATH_MAP: Record<string, string[]> = {
   audit:         ['/audit-logs'],
   notifications: ['/notifications'],
   documents:     ['/documents', '/ai-drafts', '/categories', '/services'],
+  document_forensic: ['/document-forensic'],
+  property_research: ['/property-research'],
 };
 
 export interface AdminUser {
@@ -63,8 +65,9 @@ const ROLE_DISPLAY: Record<string, string> = {
 };
 
 function buildUser(raw: any): AdminUser {
-  const role = raw.role || 'admin';
-  const perms = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS['admin'];
+  const aliases: Record<string, string> = { superadmin: 'super_admin', support: 'support_executive' };
+  const role = aliases[raw.role] || raw.role || '';
+  const perms = ROLE_PERMISSIONS[role] || [];
   const paths = perms.flatMap(p => PERMISSION_PATH_MAP[p] || []);
   return {
     _id: raw._id,
@@ -94,7 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await api.get('/auth/me');
       if (res.data?.success) {
         const rawUser = res.data.data;
-        const ADMIN_ROLES = ['admin', 'super_admin', 'support_executive', 'accounts', 'forensic_expert', 'property_verification'];
+        const ADMIN_ROLES = ['admin', 'super_admin', 'superadmin', 'support_executive', 'support', 'accounts', 'forensic_expert', 'property_verification'];
         if (!ADMIN_ROLES.includes(rawUser?.role)) {
           localStorage.removeItem('adminToken');
           localStorage.removeItem('adminUser');
@@ -108,11 +111,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('adminUser', JSON.stringify(built));
         setIsAuthenticated(true);
       }
-    } catch {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('adminUser');
-      setIsAuthenticated(false);
-      setUser(null);
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminUser');
+        setIsAuthenticated(false);
+        setUser(null);
+      } else {
+        // Preserve the cached admin session during temporary network/server outages.
+        const cached = localStorage.getItem('adminUser');
+        if (cached) {
+          try {
+            setUser(JSON.parse(cached));
+            setIsAuthenticated(true);
+          } catch { /* invalid cache is handled on the next authenticated response */ }
+        }
+      }
     } finally {
       setIsLoading(false);
     }
@@ -129,7 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         api.post('/auth/google', { accessToken }).then(res => {
           const token = res.data.data?.accessToken || res.data.token || res.data.accessToken;
           const rawUser = res.data.data?.user || res.data.data;
-          const ADMIN_ROLES = ['admin', 'super_admin', 'support_executive', 'accounts', 'forensic_expert', 'property_verification'];
+          const ADMIN_ROLES = ['admin', 'super_admin', 'superadmin', 'support_executive', 'support', 'accounts', 'forensic_expert', 'property_verification'];
           if (res.data?.success && token && rawUser && ADMIN_ROLES.includes(rawUser.role)) {
             const built = buildUser(rawUser);
             localStorage.setItem('adminToken', token);
@@ -180,7 +195,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canAccess = (path: string): boolean => {
     if (!user) return false;
     if (user.role === 'super_admin' || user.role === 'admin') return true;
-    return user.allowedPaths.includes(path);
+    return user.allowedPaths.some(allowed => path === allowed || path.startsWith(`${allowed}/`));
   };
 
   return (

@@ -67,6 +67,14 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: ZEGO_APP_ID
+        sync: false
+      - key: ZEGO_SERVER_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
 
       # Frontend URL (for CORS)
       - key: FRONTEND_URL

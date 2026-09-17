@@ -19,6 +19,14 @@ export default function Services() {
   const [selectedService, setSelectedService] = useState<any>(null);
   const [updateLoading, setUpdateLoading] = useState(false);
 
+  const openCreateService = () => {
+    setSelectedService({
+      name: '', description: '', type: 'Other', category: 'General',
+      basePrice: 0, estimatedDays: 1, isActive: true,
+    });
+    setIsModalOpen(true);
+  };
+
   const fetchServices = async () => {
     try {
       const res = await api.get('/admin/services');
@@ -41,16 +49,21 @@ export default function Services() {
     if (!selectedService) return;
     setUpdateLoading(true);
     try {
-      await api.put(`/admin/services/${selectedService._id}`, { 
+      const payload = {
         name: selectedService.name,
+        description: selectedService.description,
+        type: selectedService.type,
         category: selectedService.category,
         basePrice: selectedService.basePrice,
+        estimatedDays: selectedService.estimatedDays,
         isActive: selectedService.isActive
-      });
+      };
+      if (selectedService._id) await api.put(`/admin/services/${selectedService._id}`, payload);
+      else await api.post('/admin/services', payload);
       setIsModalOpen(false);
       fetchServices();
     } catch (err) {
-      alert('Failed to update service');
+      alert(selectedService?._id ? 'Failed to update service' : 'Failed to create service');
     } finally {
       setUpdateLoading(false);
     }
@@ -88,7 +101,7 @@ export default function Services() {
           </h2>
           <p className="text-slate-500 text-sm mt-1">Configure and manage offerings, pricing, and availability.</p>
         </div>
-        <button className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
+        <button onClick={openCreateService} className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium text-sm transition-colors shadow-sm flex items-center gap-2">
           <Plus className="w-4 h-4" />
           Add Service
         </button>
@@ -205,7 +218,7 @@ export default function Services() {
       )}
 
       {/* Service Edit Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Edit Service">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={selectedService?._id ? 'Edit Service' : 'Add Service'}>
         {selectedService && (
           <form onSubmit={handleUpdateService} className="space-y-4">
             <div>
@@ -217,16 +230,24 @@ export default function Services() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-              <select
-                value={selectedService.category}
-                onChange={(e) => setSelectedService({ ...selectedService, category: e.target.value })}
-                className="w-full bg-white border border-slate-200 text-slate-900 rounded-md p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500/50"
-              >
-                <option value="Consultation">Consultation</option>
-                <option value="Documentation">Documentation</option>
-                <option value="Representation">Representation</option>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+              <textarea value={selectedService.description || ''} onChange={(e) => setSelectedService({ ...selectedService, description: e.target.value })}
+                required rows={3} className="w-full border border-slate-200 rounded-md p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500/50" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Service Type</label>
+              <select value={selectedService.type || 'Other'} onChange={(e) => setSelectedService({ ...selectedService, type: e.target.value })}
+                className="w-full bg-white border border-slate-200 text-slate-900 rounded-md p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500/50">
+                {['Document', 'Consultation', 'Court Representation', 'Verification', 'Other'].map(type => <option key={type} value={type}>{type}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+              <Input value={selectedService.category || ''} onChange={(e) => setSelectedService({ ...selectedService, category: e.target.value })} required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Estimated Days</label>
+              <Input type="number" min="1" value={selectedService.estimatedDays || 1} onChange={(e) => setSelectedService({ ...selectedService, estimatedDays: Number(e.target.value) })} required />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Base Price (₹)</label>
@@ -252,7 +273,7 @@ export default function Services() {
                 Cancel
               </Button>
               <Button type="submit" disabled={updateLoading} className="bg-amber-500 hover:bg-amber-600 text-white">
-                {updateLoading ? 'Saving...' : 'Save Changes'}
+                {updateLoading ? 'Saving...' : selectedService._id ? 'Save Changes' : 'Create Service'}
               </Button>
             </div>
           </form>

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
-import { bookingAPI, firAPI, chatAPI } from '../../services/api';
+import { bookingAPI, firAPI, chatAPI, legalAdviceAPI } from '../../services/api';
 
 const ProfileScreen = ({ navigation }) => {
   const { user, isAuthenticated, refreshUser, logout } = useAuth();
@@ -42,14 +42,17 @@ const ProfileScreen = ({ navigation }) => {
 
   const fetchRealStats = async () => {
     try {
-      const [bookingsRes, draftsRes, chatsRes] = await Promise.allSettled([
+      const [bookingsRes, draftsRes, firRequestsRes, chatsRes] = await Promise.allSettled([
         bookingAPI.getMy(),
         firAPI.getMyDrafts(),
+        legalAdviceAPI.getMyRequests({ serviceType: 'fir_draft' }),
         chatAPI.getChats(),
       ]);
+      const generatedDrafts = draftsRes.status === 'fulfilled' ? (draftsRes.value.data?.data?.length || 0) : 0;
+      const assistedDrafts = firRequestsRes.status === 'fulfilled' ? (firRequestsRes.value.data?.data?.length || 0) : 0;
       setStats({
         consultations: bookingsRes.status === 'fulfilled' ? (bookingsRes.value.data?.data?.length || 0) : 0,
-        drafts: draftsRes.status === 'fulfilled' ? (draftsRes.value.data?.data?.length || 0) : 0,
+        drafts: generatedDrafts + assistedDrafts,
         chats: chatsRes.status === 'fulfilled' ? (chatsRes.value.data?.data?.length || chatsRes.value.data?.length || 0) : 0,
       });
     } catch (err) {
@@ -65,7 +68,7 @@ const ProfileScreen = ({ navigation }) => {
 
   // Menu items — if guest, navigate to login instead
   const menuItems = [
-    { id: '0', icon: 'time-outline',        title: 'My FIR Drafts',    subtitle: 'View your saved legal drafts',          screen: 'MyDrafts',      requiresAuth: false },
+    { id: '0', icon: 'time-outline',        title: 'My FIR Drafts',    subtitle: 'View and manage your FIR drafts',        screen: 'MyDrafts',      requiresAuth: true  },
     { id: '1', icon: 'chatbubble-outline',   title: 'My Chats',         subtitle: 'All conversations with advocates',      screen: 'ChatList',      requiresAuth: true  },
     { id: '2', icon: 'document-text-outline',title: 'My Requests',      subtitle: 'Status and Report',                     screen: 'MyBookings',    requiresAuth: true  },
     { id: '4', icon: 'settings-outline',     title: 'Settings',         subtitle: 'Language, notification & Privacy',      screen: 'Settings',      requiresAuth: false },
@@ -169,7 +172,7 @@ const ProfileScreen = ({ navigation }) => {
             <Text style={styles.statLabelText}>Bookings</Text>
           </TouchableOpacity>
           <View style={styles.statVLine} />
-          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('MyDrafts')} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.statBox} onPress={() => handleMenuPress({ screen: 'MyDrafts', requiresAuth: true })} activeOpacity={0.7}>
             <Text style={styles.statNumText}>{isAuthenticated ? stats.drafts : '-'}</Text>
             <Text style={styles.statLabelText}>FIR Drafts</Text>
           </TouchableOpacity>

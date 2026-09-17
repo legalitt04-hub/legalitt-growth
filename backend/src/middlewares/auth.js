@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { AppError } = require('./errorHandler');
 const logger = require('../utils/logger');
+const { getPlatformSettings } = require('./platformSettings');
 
 // Verify access token
 const protect = async (req, res, next) => {
@@ -24,8 +25,19 @@ const protect = async (req, res, next) => {
     if (!user) {
       return next(new AppError('User no longer exists.', 401));
     }
+    if (!user.isActive) {
+      return next(new AppError('This account has been deactivated.', 403));
+    }
+    if (user.passwordChangedAfter?.(decoded.iat)) {
+      return next(new AppError('Password was changed. Please log in again.', 401));
+    }
 
     req.user = user;
+    const adminRoles = ['admin', 'super_admin', 'superadmin', 'support_executive', 'support', 'accounts', 'forensic_expert', 'property_verification'];
+    if (!adminRoles.includes(user.role)) {
+      const settings = await getPlatformSettings();
+      if (settings.maintenanceMode) return next(new AppError('Legalitt is temporarily under maintenance. Please try again shortly.', 503));
+    }
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {

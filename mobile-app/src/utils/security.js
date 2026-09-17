@@ -1,5 +1,5 @@
 import * as SecureStore from '../utils/secureStorage';
-import { Platform } from 'react-native';
+import * as Crypto from 'expo-crypto';
 
 /**
  * XSS Prevention: Strip script tags, HTML tags, and inline event handlers.
@@ -43,16 +43,14 @@ const getOrCreateKey = async () => {
   try {
     let key = await SecureStore.getItemAsync(ENCRYPTION_KEY_NAME);
     if (!key) {
-      // Generate a strong dynamic key
-      key = Math.random().toString(36).substring(2) + 
-            Math.random().toString(36).substring(2) + 
-            Math.random().toString(36).substring(2);
+      const bytes = await Crypto.getRandomBytesAsync(32);
+      key = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
       await SecureStore.setItemAsync(ENCRYPTION_KEY_NAME, key);
     }
     return key;
   } catch (err) {
     console.error('Error generating secure key:', err);
-    return 'fallback_legalitt_key_9988';
+    throw new Error('Secure local encryption key is unavailable');
   }
 };
 
@@ -74,7 +72,7 @@ export const encryptData = async (dataString) => {
     return btoa(unescape(encodeURIComponent(ciphered)));
   } catch (err) {
     console.error('Failed to encrypt data:', err);
-    return dataString;
+    throw err;
   }
 };
 

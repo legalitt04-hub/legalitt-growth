@@ -10,6 +10,9 @@ const ChatHistory = require('../models/ChatHistory');
 
 
 const { aiRateLimiter } = require('../middlewares/rateLimiter');
+const { requireFeature } = require('../middlewares/platformSettings');
+
+router.use(requireFeature('aiEnabled'));
 
 // GET /api/ai/history - Get user's chat history with auto-title backfill
 router.get('/history', protect, async (req, res, next) => {
@@ -192,4 +195,3 @@ router.get('/stream', protect, aiRateLimiter, async (req, res, next) => {
 });
 
 module.exports = router;
-

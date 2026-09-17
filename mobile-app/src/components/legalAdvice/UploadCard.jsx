@@ -38,7 +38,11 @@ export const UploadCard = ({ files = [], onPickFile, onRemoveFile }) => {
               <Ionicons name="document-text-outline" size={20} color={LEGAL_THEME.colors.primaryGold} />
               <View style={styles.fileDetails}>
                 <Text style={styles.fileName} numberOfLines={1}>{file.name || `Document_${index + 1}.pdf`}</Text>
-                <Text style={styles.fileSize}>{file.size || '1.2 MB'}</Text>
+                <Text style={styles.fileSize}>
+                  {typeof file.size === 'number'
+                    ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+                    : (file.size || 'Size unavailable')}
+                </Text>
               </View>
               <TouchableOpacity onPress={() => onRemoveFile(index)}>
                 <Ionicons name="close-circle" size={20} color="#EF4444" />

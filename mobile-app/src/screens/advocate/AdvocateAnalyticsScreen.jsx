@@ -20,7 +20,7 @@ import Svg, {
   Text as SvgText,
   Line,
 } from 'react-native-svg';
-import api, { advocateAPI } from '../../services/api';
+import api from '../../services/api';
 import { formatINR } from '../../utils/helpers';
 
 // Period Filter Options
@@ -74,7 +74,8 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
     monthlyPerformance: [],
   });
 
-  // Consolidated Analytics Fetcher (Protected against duplicate & in-flight loops)
+  // Consolidated analytics fetcher. The selected month and range are sent to the API,
+  // so every selector changes the figures instead of only changing the label.
   const fetchAnalyticsData = useCallback(async (isSilent = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -83,105 +84,52 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
     setHasError(false);
 
     try {
-      // Fetch stats and bookings concurrently
-      const [statsRes, bookingsRes] = await Promise.allSettled([
-        api.get('/advocate-dashboard/stats'),
-        api.get('/advocate-dashboard/bookings?limit=100'),
-      ]);
+      const periodKey = {
+        'This Month': 'this_month',
+        'Last Month': 'last_month',
+        'Last 3 Months': 'last_3_months',
+        'Last 6 Months': 'last_6_months',
+        'All Time': 'all_time',
+      }[selectedPeriod];
+      const response = await api.get('/advocate-dashboard/stats', {
+        params: { year: selectedYear, month: selectedMonthIndex + 1, period: periodKey },
+      });
+      if (!response.data?.success) throw new Error(response.data?.message || 'Unable to load analytics');
 
-      let monthlyEarn = 0;
-      let totalConsults = 0;
-      let completedCount = 0;
-      let pendingCount = 0;
-      let cancelledCount = 0;
-      let weeklyData = [];
-      let monthlyTrendTable = [];
-      let serviceList = [];
-
-      // Parse Dashboard Stats
-      if (statsRes.status === 'fulfilled' && statsRes.value.data?.success) {
-        const d = statsRes.value.data.data;
-        if (d.earningsSummary?.monthly !== undefined) {
-          monthlyEarn = d.earningsSummary.monthly;
-        }
-
-        // Map real 6-month earnings if present
-        if (d.analytics?.labelsMonthly && d.analytics?.monthlyEarningsTrend) {
-          const mLabels = d.analytics.labelsMonthly;
-          const mEarns = d.analytics.monthlyEarningsTrend;
-          const currentMonthPrefix = MONTH_NAMES[new Date().getMonth()].slice(0, 3).toLowerCase();
-          monthlyTrendTable = mLabels.map((lbl, idx) => ({
-            month: lbl,
-            earnings: mEarns[idx] || 0,
-            consultations: Math.max(1, Math.round((mEarns[idx] || 0) / 1800)),
-            rating: d.ratingStats?.averageRating || 4.8,
-            isCurrent: lbl.toLowerCase().startsWith(currentMonthPrefix),
-          }));
-        }
-
-        // Map real 7-day or 4-week earnings
-        if (d.analytics?.earningsTrend && d.analytics.earningsTrend.length > 0) {
-          const trend = d.analytics.earningsTrend;
-          const sum = trend.reduce((a, b) => a + b, 0);
-          if (sum > 0) {
-            weeklyData = [
-              { label: 'Week 1', amount: Math.round(sum * 0.22) },
-              { label: 'Week 2', amount: Math.round(sum * 0.28) },
-              { label: 'Week 3', amount: Math.round(sum * 0.24) },
-              { label: 'Week 4', amount: Math.round(sum * 0.26) },
-            ];
-          }
-        }
-      }
-
-      // Parse Bookings for Consultation Breakdown & Service Performance
-      if (bookingsRes.status === 'fulfilled' && bookingsRes.value.data?.data) {
-        const bList = bookingsRes.value.data.data || [];
-        totalConsults = bList.length;
-        completedCount = bList.filter(b => b.status === 'confirmed' || b.status === 'completed').length;
-        pendingCount = bList.filter(b => b.status === 'pending').length;
-        cancelledCount = bList.filter(b => b.status === 'cancelled').length;
-
-        // Category distribution
-        const counts = {};
-        bList.forEach(b => {
-          const cat = b.type || b.consultationType || b.service || 'Legal Advice';
-          counts[cat] = (counts[cat] || 0) + 1;
-        });
-
-        const maxC = Math.max(...Object.values(counts), 1);
-        const formattedServices = Object.keys(counts).map(k => ({
-          name: k.charAt(0).toUpperCase() + k.slice(1),
-          count: counts[k],
-          percentage: Math.round((counts[k] / maxC) * 100),
-        }));
-        if (formattedServices.length > 0) {
-          serviceList = formattedServices.sort((a, b) => b.count - a.count);
-        }
-      }
-
-      const calculatedAcceptanceRate = totalConsults > 0
-        ? Math.round((completedCount / totalConsults) * 100)
-        : 0;
+      const data = response.data.data || {};
+      const analytics = data.analytics || {};
+      const summary = analytics.selectedPeriod || {};
+      const monthLabels = analytics.labelsMonthly || [];
+      const selectedMonthPrefix = MONTH_NAMES[selectedMonthIndex].slice(0, 3).toLowerCase();
+      const monthlyPerformance = monthLabels.map((label, index) => ({
+        month: label,
+        earnings: analytics.monthlyEarningsTrend?.[index] || 0,
+        consultations: analytics.monthlyConsultationTrend?.[index] || 0,
+        rating: analytics.monthlyRatingTrend?.[index] || 0,
+        isCurrent: index === monthLabels.length - 1 && label.toLowerCase().startsWith(selectedMonthPrefix),
+      }));
 
       setAnalyticsData({
-        totalEarnings: monthlyEarn,
-        earningsGrowth: 0,
-        consultationsCount: totalConsults,
-        consultationsGrowth: 0,
-        completedCases: completedCount,
-        completedGrowth: 0,
-        acceptanceRate: calculatedAcceptanceRate,
-        acceptanceGrowth: 0,
-        earningsWeekly: weeklyData,
+        totalEarnings: summary.earnings || 0,
+        earningsGrowth: summary.growth?.earnings || 0,
+        consultationsCount: summary.consultations || 0,
+        consultationsGrowth: summary.growth?.consultations || 0,
+        completedCases: summary.completed || 0,
+        completedGrowth: summary.growth?.completed || 0,
+        acceptanceRate: summary.acceptanceRate || 0,
+        acceptanceGrowth: summary.growth?.acceptance || 0,
+        earningsWeekly: (analytics.earningsTrend || []).map((amount, index) => ({
+          label: analytics.labels?.[index] || `Day ${index + 1}`,
+          amount: amount || 0,
+        })),
         consultationBreakdown: {
-          completed: completedCount,
-          pending: pendingCount,
-          cancelled: cancelledCount,
-          total: totalConsults,
+          completed: summary.completed || 0,
+          pending: summary.pending || 0,
+          cancelled: summary.cancelled || 0,
+          total: summary.consultations || 0,
         },
-        servicePerformance: serviceList,
-        monthlyPerformance: monthlyTrendTable,
+        servicePerformance: summary.servicePerformance || [],
+        monthlyPerformance,
       });
     } catch (err) {
       console.log('Analytics data fetch note:', err?.message);
@@ -191,9 +139,9 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedMonthIndex, selectedPeriod, selectedYear]);
 
-  // Fetch exactly ONCE on initial mount
+  // Refresh whenever the selected month or period changes.
   useEffect(() => {
     fetchAnalyticsData();
   }, [fetchAnalyticsData]);
@@ -527,6 +475,9 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
   }
 
   const selectedMonthText = `${MONTH_NAMES[selectedMonthIndex]} ${selectedYear}`;
+  const today = new Date();
+  const isNextMonthDisabled = selectedYear > today.getFullYear()
+    || (selectedYear === today.getFullYear() && selectedMonthIndex >= today.getMonth());
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -593,8 +544,9 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
               <Text style={styles.monthStepperText}>{selectedMonthText}</Text>
               
               <TouchableOpacity
-                style={styles.stepperBtn}
+                style={[styles.stepperBtn, isNextMonthDisabled && { opacity: 0.35 }]}
                 onPress={handleNextMonth}
+                disabled={isNextMonthDisabled}
                 accessibilityRole="button"
                 accessibilityLabel="Next Month"
               >
@@ -654,8 +606,8 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
                     {formatINR(analyticsData.totalEarnings)}
                   </Text>
                   <View style={styles.trendRow}>
-                    <Ionicons name="arrow-up" size={12} color="#10B981" />
-                    <Text style={styles.trendText}>
+                    <Ionicons name={analyticsData.earningsGrowth >= 0 ? "arrow-up" : "arrow-down"} size={12} color={analyticsData.earningsGrowth >= 0 ? "#10B981" : "#EF4444"} />
+                    <Text style={[styles.trendText, analyticsData.earningsGrowth < 0 && { color: '#EF4444' }]}>
                       {analyticsData.earningsGrowth}%
                     </Text>
                   </View>
@@ -668,8 +620,8 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
                     {analyticsData.consultationsCount}
                   </Text>
                   <View style={styles.trendRow}>
-                    <Ionicons name="arrow-up" size={12} color="#10B981" />
-                    <Text style={styles.trendText}>
+                    <Ionicons name={analyticsData.consultationsGrowth >= 0 ? "arrow-up" : "arrow-down"} size={12} color={analyticsData.consultationsGrowth >= 0 ? "#10B981" : "#EF4444"} />
+                    <Text style={[styles.trendText, analyticsData.consultationsGrowth < 0 && { color: '#EF4444' }]}>
                       {analyticsData.consultationsGrowth}%
                     </Text>
                   </View>
@@ -682,8 +634,8 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
                     {analyticsData.completedCases}
                   </Text>
                   <View style={styles.trendRow}>
-                    <Ionicons name="arrow-up" size={12} color="#10B981" />
-                    <Text style={styles.trendText}>
+                    <Ionicons name={analyticsData.completedGrowth >= 0 ? "arrow-up" : "arrow-down"} size={12} color={analyticsData.completedGrowth >= 0 ? "#10B981" : "#EF4444"} />
+                    <Text style={[styles.trendText, analyticsData.completedGrowth < 0 && { color: '#EF4444' }]}>
                       {analyticsData.completedGrowth}%
                     </Text>
                   </View>
@@ -696,8 +648,8 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
                     {analyticsData.acceptanceRate}%
                   </Text>
                   <View style={styles.trendRow}>
-                    <Ionicons name="arrow-up" size={12} color="#10B981" />
-                    <Text style={styles.trendText}>
+                    <Ionicons name={analyticsData.acceptanceGrowth >= 0 ? "arrow-up" : "arrow-down"} size={12} color={analyticsData.acceptanceGrowth >= 0 ? "#10B981" : "#EF4444"} />
+                    <Text style={[styles.trendText, analyticsData.acceptanceGrowth < 0 && { color: '#EF4444' }]}>
                       {analyticsData.acceptanceGrowth}%
                     </Text>
                   </View>
@@ -718,9 +670,9 @@ export default function AdvocateAnalyticsScreen({ navigation }) {
                 </View>
 
                 <View style={styles.trendSubtitleRow}>
-                  <Ionicons name="arrow-up" size={13} color="#10B981" />
-                  <Text style={styles.trendSubtitleText}>
-                    {analyticsData.earningsGrowth}% Higher Than last Month
+                  <Ionicons name={analyticsData.earningsGrowth >= 0 ? "arrow-up" : "arrow-down"} size={13} color={analyticsData.earningsGrowth >= 0 ? "#10B981" : "#EF4444"} />
+                  <Text style={[styles.trendSubtitleText, analyticsData.earningsGrowth < 0 && { color: '#EF4444' }]}>
+                    {Math.abs(analyticsData.earningsGrowth)}% {analyticsData.earningsGrowth >= 0 ? 'higher' : 'lower'} than the previous period
                   </Text>
                 </View>
 

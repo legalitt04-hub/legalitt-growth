@@ -18,27 +18,27 @@ export default function CallFeedbackScreen({ navigation, route }) {
       Alert.alert('Hold on', 'Please select a star rating first!');
       return;
     }
+    if (!bookingId) {
+      Alert.alert('Feedback unavailable', 'This call is not linked to a completed booking.');
+      return;
+    }
     
     setIsSubmitting(true);
     
     try {
-      if (bookingId) {
-        await reviewAPI.create({
-          bookingId,
-          advocateId: advocateUserId, // Used for mock reviews in dev if bookingId is fake
-          rating,
-          comment: feedback
-        });
-      }
+      await reviewAPI.create({
+        bookingId,
+        advocateId: advocateUserId,
+        rating,
+        comment: feedback
+      });
       setIsSubmitting(false);
       Alert.alert('Thank You!', 'Your feedback helps us improve.', [
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
     } catch (error) {
       setIsSubmitting(false);
-      Alert.alert('Notice', 'Failed to submit feedback, but your call was successful.', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
+      Alert.alert('Feedback not submitted', error?.response?.data?.message || 'Please try again.');
     }
   };
 

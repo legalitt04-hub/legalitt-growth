@@ -7,8 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Linking,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +18,7 @@ export default function PropertyResearchLandingScreen({ navigation }) {
   const insets = useSafeAreaInsets();
 
   const handleCallSupport = () => {
-    Linking.openURL('tel:18001234567');
+    navigation.navigate('Support');
   };
 
   return (

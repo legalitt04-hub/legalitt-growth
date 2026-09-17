@@ -85,6 +85,20 @@ const advocateSchema = new mongoose.Schema({
       isBooked: { type: Boolean, default: false },
     }],
   }],
+  courtHearings: [{
+    courtType: { type: String, trim: true },
+    courtName: { type: String, required: true, trim: true },
+    courtLocation: { type: String, trim: true },
+    courtroom: { type: String, trim: true },
+    caseTitle: { type: String, required: true, trim: true },
+    caseNumber: { type: String, required: true, trim: true },
+    hearingDate: { type: Date, required: true },
+    hearingTime: { type: String, trim: true },
+    advocateRole: { type: String, trim: true },
+    status: { type: String, enum: ['Upcoming', 'Completed', 'Adjourned', 'Cancelled'], default: 'Upcoming' },
+    notes: { type: String, maxlength: 2000 },
+    reminders: [String],
+  }],
   documents: {
     barCouncilCertificate: String,
     degreeDocument: String,
@@ -96,7 +110,7 @@ const advocateSchema = new mongoose.Schema({
   },
   verificationStatus: {
     type: String,
-    enum: ['pending', 'under_review', 'approved', 'rejected'],
+    enum: ['pending', 'under_review', 'approved', 'rejected', 'suspended'],
     default: 'pending',
   },
   rating: {
@@ -110,6 +124,14 @@ const advocateSchema = new mongoose.Schema({
   isOnline: {
     type: Boolean,
     default: false,
+  },
+  appPreferences: {
+    bookingRequest: { type: Boolean, default: true },
+    appointmentReminders: { type: Boolean, default: true },
+    clientMessages: { type: Boolean, default: true },
+    paymentNotifications: { type: Boolean, default: true },
+    videoConsultation: { type: Boolean, default: true },
+    voiceConsultation: { type: Boolean, default: true },
   },
   // Earnings wallet — credited on each consultation payment
   wallet: {

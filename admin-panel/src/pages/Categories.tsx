@@ -16,7 +16,7 @@ export default function Categories() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
-  const [basePrice, setBasePrice] = useState(499);
+  const [basePrice, setBasePrice] = useState(0);
 
   const fetchCategories = async () => {
     try {
@@ -40,7 +40,7 @@ export default function Categories() {
     setName('');
     setSlug('');
     setDescription('');
-    setBasePrice(499);
+    setBasePrice(0);
     setIsModalOpen(true);
   };
 
@@ -49,7 +49,7 @@ export default function Categories() {
     setName(cat.name);
     setSlug(cat.slug);
     setDescription(cat.description || '');
-    setBasePrice(cat.basePrice || 499);
+    setBasePrice(cat.basePrice ?? 0);
     setIsModalOpen(true);
   };
 

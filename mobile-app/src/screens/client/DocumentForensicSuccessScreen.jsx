@@ -1,5 +1,5 @@
 // screens/client/DocumentForensicSuccessScreen.jsx
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,9 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as SecureStore from '../../utils/secureStorage';
-import Toast from 'react-native-toast-message';
 
 // ─── COLOR PALETTE ─────────────────────────────────────────────────────────────
 const PALETTE = {
@@ -39,30 +36,19 @@ export default function DocumentForensicSuccessScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const {
     requestId: passedRequestId,
+    bookingId,
     document,
     documentType,
     totalAmount,
   } = route?.params || {};
 
   // Formatted Request ID
-  const requestId = passedRequestId || 'DF-2026-00245';
-
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyId = () => {
-    setCopied(true);
-    Toast.show({
-      type: 'success',
-      text1: 'Copied to Clipboard',
-      text2: `Request ID ${requestId} copied.`,
-      visibilityTime: 2000,
-    });
-    setTimeout(() => setCopied(false), 2500);
-  };
+  const requestId = passedRequestId || (bookingId ? `#DF-${bookingId.slice(-6).toUpperCase()}` : 'Not available');
 
   const handleTrackAnalysis = () => {
     navigation.navigate('DocumentForensicTrack', {
       requestId,
+      bookingId,
       document,
       documentType,
       totalAmount,
@@ -125,18 +111,6 @@ export default function DocumentForensicSuccessScreen({ navigation, route }) {
               <Text style={styles.detailLabel}>Request ID</Text>
               <Text style={styles.detailValue}>{requestId}</Text>
             </View>
-            <TouchableOpacity
-              style={styles.copyBtn}
-              onPress={handleCopyId}
-              activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons
-                name={copied ? 'checkmark-circle' : 'copy-outline'}
-                size={18}
-                color={copied ? PALETTE.successGreen : PALETTE.textMuted}
-              />
-            </TouchableOpacity>
           </View>
 
           <View style={styles.rowDivider} />

@@ -27,7 +27,7 @@ cp .env.example .env
 
 ### 3. Required .env Values
 ```
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/legalitt
+MONGODB_URI=mongodb+srv://YOUR_USERNAME@YOUR_CLUSTER/YOUR_DATABASE
 JWT_SECRET=min_32_char_random_string_here
 JWT_REFRESH_SECRET=another_32_char_random_string
 GOOGLE_CLIENT_ID=477031689444-qss3ik1q1cvgtcels5uq04qfmh38msa4.apps.googleusercontent.com
