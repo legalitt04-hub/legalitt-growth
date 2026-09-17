@@ -1,28 +1,52 @@
 {
   "project_info": {
-    "project_number": "400989529051",
+    "project_number": "145094326598",
     "project_id": "legalitt-prod",
     "storage_bucket": "legalitt-prod.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:400989529051:android:7e9582f0a847355da48d47",
+        "mobilesdk_app_id": "1:145094326598:android:7e9582f0a847355da48d47",
         "android_client_info": {
           "package_name": "com.legalitt.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "400989529051-5jmb7omhkks18b28oqf20b6nk19ggn3u.apps.googleusercontent.com",
+          "client_id": "145094326598-1nopi4c0pjf52ga3g8f5lrpqf68ca79s.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.legalitt.app",
-            "certificate_hash": "9d5d79781dec6e5de06744cc3d95fe74e26e8667"
+            "certificate_hash": "94ac1d364c272ea3a297fd0ef3d8afb69ca5f6ab"
           }
         },
         {
-          "client_id": "400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com",
+          "client_id": "145094326598-7g1u6htkin0fhaqiojro18dcf92h15r5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.legalitt.app",
+            "certificate_hash": "e9cde9eaedcddd6950d59c4b7bed49b04ad33706"
+          }
+        },
+        {
+          "client_id": "145094326598-9m3b8pcgee06p0u07773i17n0v2i9uq3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.legalitt.app",
+            "certificate_hash": "f7d81dfeca343f85cc3bc2bdb087939dff81694d"
+          }
+        },
+        {
+          "client_id": "145094326598-hiumgms8dbl83ajohvrp3dgejblhe0it.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.legalitt.app",
+            "certificate_hash": "ef73a7d7b183d0e47ad28ca652953f561fa279e2"
+          }
+        },
+        {
+          "client_id": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
@@ -35,7 +59,7 @@
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com",
+              "client_id": "145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

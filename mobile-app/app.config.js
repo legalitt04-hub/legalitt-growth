@@ -107,7 +107,7 @@ export default ({ config }) => ({
       },
       API_URL: process.env.API_URL || 'https://legalitt-growth.onrender.com/api/v1',
       SOCKET_URL: process.env.SOCKET_URL || 'https://legalitt-growth.onrender.com',
-      GOOGLE_WEB_CLIENT_ID: '400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com',
+      GOOGLE_WEB_CLIENT_ID: '145094326598-95qo14kskqa4ddr6k57rrs9ebp1so35t.apps.googleusercontent.com',
       GOOGLE_ANDROID_CLIENT_ID: process.env.GOOGLE_ANDROID_CLIENT_ID,
     }
   }
