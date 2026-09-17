@@ -106,18 +106,17 @@ if (process.env.NODE_ENV === 'development') {
   }));
 }
 
-// Health check (Render hits / by default)
-app.get('/', (req, res) => res.json({
+const healthPayload = () => ({
   success: true, message: 'Legalitt API is running',
   timestamp: new Date().toISOString(),
   environment: process.env.NODE_ENV,
-}));
+  build: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || 'local').slice(0, 7),
+});
 
-app.get('/health', (req, res) => res.json({
-  success: true, message: 'Legalitt API is running',
-  timestamp: new Date().toISOString(),
-  environment: process.env.NODE_ENV,
-}));
+// Health check (Render hits / by default). The build SHA lets CI verify that
+// the latest revision is live instead of accepting a healthy older deploy.
+app.get('/', (req, res) => res.json(healthPayload()));
+app.get('/health', (req, res) => res.json(healthPayload()));
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
