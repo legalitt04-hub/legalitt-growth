@@ -16,6 +16,10 @@ import { usePricing } from '../../context/PricingContext';
 import SkeletonLoader from '../../components/common/SkeletonLoader';
 
 const STATUS_CONFIG = {
+  pending_payment: {
+    bg: '#FEF2F2', border: '#FCA5A5', text: '#B91C1C', icon: 'alert-circle-outline',
+    label: 'Booking Failed / Unpaid',
+  },
   pending_assignment: {
     bg: '#FFFBEB', border: '#FDE68A', text: '#B45309', icon: 'time-outline',
     label: 'Awaiting Advocate (24h)', isWaiting: true,
@@ -39,6 +43,14 @@ const STATUS_CONFIG = {
   cancelled: {
     bg: '#FEF2F2', border: '#FCA5A5', text: '#991B1B', icon: 'close-circle-outline',
     label: 'Cancelled',
+  },
+  failed: {
+    bg: '#FEF2F2', border: '#FCA5A5', text: '#B91C1C', icon: 'alert-circle-outline',
+    label: 'Booking Failed',
+  },
+  payment_failed: {
+    bg: '#FEF2F2', border: '#FCA5A5', text: '#B91C1C', icon: 'card-outline',
+    label: 'Payment Failed',
   },
 };
 

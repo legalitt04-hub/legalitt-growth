@@ -3,10 +3,10 @@ const DISCLAIMER = '\n\n⚠️ DISCLAIMER: This is AI-generated information for 
 // ── Groq models in priority order (Sep 2026 confirmed active) ────────────────
 // Each model is tried in order — if model_not_found, next one is tried automatically
 const GROQ_MODELS = [
-  'meta-llama/llama-4-maverick-17b-128e-instruct', // Best quality — Llama 4
-  'llama-3.3-70b-versatile',                        // High quality — Llama 3.3
-  'meta-llama/llama-4-scout-17b-16e-instruct',      // Llama 4 Scout
-  'llama-3.1-8b-instant',                           // Fastest — always available
+  'openai/gpt-oss-20b',
+  'groq/compound',
+  'qwen/qwen3.8-27b',
+  'allam-2-7b',
 ];
 
 const isModelError = (status, msg = '') =>
