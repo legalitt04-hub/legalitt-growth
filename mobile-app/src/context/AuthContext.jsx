@@ -75,6 +75,24 @@ export const AuthProvider = ({ children }) => {
   // On app start — restore session
   useEffect(() => {
     const restoreSession = async () => {
+      // ── Safety timeout: never let isRestoring block UI for > 10s ──────────
+      // Render free-tier cold starts can take 30s+ causing a permanent black
+      // screen. If we exceed 10s we fall back to cached user or unauthenticated.
+      const safetyTimer = setTimeout(async () => {
+        try {
+          const cached = await AsyncStorage.getItem(CACHED_USER_KEY);
+          if (cached) {
+            const token = await SecureStore.getItemAsync(TOKEN_KEY);
+            dispatch({ type: 'LOGIN_SUCCESS', payload: JSON.parse(cached) });
+            if (token) connectSocket(token);
+          } else {
+            dispatch({ type: 'LOADED' });
+          }
+        } catch {
+          dispatch({ type: 'LOADED' });
+        }
+      }, 10000);
+
       try {
         // Restore consent status first
         const consentVal = await AsyncStorage.getItem('legalitt_consent_accepted');
@@ -85,14 +103,34 @@ export const AuthProvider = ({ children }) => {
         dispatch({ type: 'SET_BIOMETRICS', payload: bioVal === 'true' });
 
         const token = await SecureStore.getItemAsync(TOKEN_KEY);
-        if (!token) return dispatch({ type: 'LOADED' });
+        if (!token) {
+          clearTimeout(safetyTimer);
+          return dispatch({ type: 'LOADED' });
+        }
 
+        // ── Immediately restore cached user so splash releases fast ──────────
+        // We then silently refresh from network in the background.
+        const cached = await AsyncStorage.getItem(CACHED_USER_KEY);
+        if (cached) {
+          clearTimeout(safetyTimer);
+          dispatch({ type: 'LOGIN_SUCCESS', payload: JSON.parse(cached) });
+          connectSocket(token);
+          // Silently refresh user data in background (no await)
+          authAPI.getMe().then(async ({ data }) => {
+            await cacheUser(data.data);
+            dispatch({ type: 'UPDATE_USER', payload: data.data });
+          }).catch(() => {/* ignore — cached user already displayed */});
+          return;
+        }
+
+        // No cache — must wait for network
         const { data } = await authAPI.getMe();
+        clearTimeout(safetyTimer);
         await cacheUser(data.data);
         dispatch({ type: 'LOGIN_SUCCESS', payload: data.data });
-        // Connect socket immediately using the saved token
         connectSocket(token);
       } catch (err) {
+        clearTimeout(safetyTimer);
         const status = err.response?.status;
         if (status === 401 || status === 403) {
           await SecureStore.deleteItemAsync(TOKEN_KEY);
@@ -102,8 +140,9 @@ export const AuthProvider = ({ children }) => {
         } else {
           const cached = await AsyncStorage.getItem(CACHED_USER_KEY);
           if (cached) {
+            const token = await SecureStore.getItemAsync(TOKEN_KEY);
             dispatch({ type: 'LOGIN_SUCCESS', payload: JSON.parse(cached) });
-            connectSocket(token);
+            if (token) connectSocket(token);
           } else {
             dispatch({ type: 'LOADED' });
           }

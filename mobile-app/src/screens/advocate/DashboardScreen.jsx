@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   StatusBar, Switch, RefreshControl, Image, Alert, ActivityIndicator, Share
@@ -146,6 +146,7 @@ const AdvocateDashboardScreen = ({ navigation }) => {
   const [online, setOnline] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -186,23 +187,30 @@ const AdvocateDashboardScreen = ({ navigation }) => {
     }
   });
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async ({ showLoader = false } = {}) => {
     try {
-      if (!dashboardData.ratingStats) setLoading(true);
-      const response = await api.get('/advocate-dashboard/stats');
+      if (showLoader) setLoading(true);
+      setLoadError('');
+      const response = await api.get('/advocate-dashboard/stats', {
+        timeout: 30000,
+        retry: 0,
+      });
       if (response.data?.success) {
         setDashboardData(response.data.data);
+      } else {
+        throw new Error(response.data?.message || 'Dashboard data could not be loaded.');
       }
     } catch (error) {
-      console.log('Error fetching advocate dashboard stats:', error);
+      console.log('Error fetching advocate dashboard stats:', error?.message);
+      setLoadError(error.response?.data?.message || 'Could not load dashboard data. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    fetchDashboardData({ showLoader: true });
+  }, [fetchDashboardData]);
 
   // ─── Real-time: listen for new booking assigned by admin ────────────────
   useEffect(() => {
@@ -280,7 +288,7 @@ const AdvocateDashboardScreen = ({ navigation }) => {
       socket.off('new_booking_assigned', handleNewBooking);
       socket.off('slot_scheduled', handleSlotScheduled);
     };
-  }, [navigation, user]);
+  }, [fetchDashboardData, navigation, user]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -378,6 +386,23 @@ const AdvocateDashboardScreen = ({ navigation }) => {
           paddingBottom: Math.max(insets.bottom, 12) + 115,
         }}
       >
+        {!!loadError && !loading && (
+          <View style={styles.loadErrorCard}>
+            <Ionicons name="cloud-offline-outline" size={22} color="#B45309" />
+            <View style={styles.loadErrorContent}>
+              <Text style={styles.loadErrorTitle}>Dashboard data not loaded</Text>
+              <Text style={styles.loadErrorText}>{loadError}</Text>
+            </View>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading dashboard"
+              style={styles.retryButton}
+              onPress={() => fetchDashboardData({ showLoader: true })}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {loading ? (
           <View>
              {/* Skeletons for Profile & Stats */}
@@ -692,6 +717,12 @@ const styles = StyleSheet.create({
   viewAllText: { fontSize: 12, color: COLORS.primary, fontWeight: '700' },
   emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', marginBottom: 16 },
   emptyText: { fontSize: 12, color: '#9CA3AF', marginTop: 8, fontWeight: '500', textAlign: 'center' },
+  loadErrorCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 14, padding: 12, marginBottom: 14 },
+  loadErrorContent: { flex: 1 },
+  loadErrorTitle: { fontSize: 13, fontWeight: '800', color: '#92400E' },
+  loadErrorText: { fontSize: 11, lineHeight: 16, color: '#A16207', marginTop: 2 },
+  retryButton: { backgroundColor: '#B45309', borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 },
+  retryButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
 
   card: {
     backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16,

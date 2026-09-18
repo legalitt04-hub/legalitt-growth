@@ -53,34 +53,39 @@ exports.getDashboardStats = async (req, res) => {
       selectedStart = new Date(0);
     }
 
-    // 3. Today's Appointments (pending or today-confirmed)
-    const todayAppointments = await Booking.find({
-      advocate: advocateId,
-      $or: [
-        { date: { $gte: startOfToday, $lte: endOfToday }, status: 'confirmed' },
-        { status: 'pending' }
-      ]
-    }).lean()
-    .populate('client', 'name email avatar phone')
-    .sort({ 'timeSlot.startTime': 1 })
-    .lean();
+    // Load independent dashboard datasets together so the app does not wait
+    // for several database round trips in sequence.
+    const [todayAppointments, advocateChats, allAdvocateReviews, allBookings] = await Promise.all([
+      Booking.find({
+        advocate: advocateId,
+        $or: [
+          { date: { $gte: startOfToday, $lte: endOfToday }, status: 'confirmed' },
+          { status: 'pending' }
+        ]
+      })
+        .populate('client', 'name email avatar phone')
+        .sort({ 'timeSlot.startTime': 1 })
+        .lean(),
+      Chat.find({ participants: userId }).select('_id').lean(),
+      Review.find({ advocate: advocateId })
+        .populate('client', 'name avatar')
+        .populate('booking', 'type issue')
+        .sort({ createdAt: -1 })
+        .lean(),
+      Booking.find({ advocate: advocateId })
+        .select('payment status serviceType consultationMode type createdAt date')
+        .lean(),
+    ]);
 
     // 4. Pending unread messages
-    const advocateChats   = await Chat.find({ participants: userId }).lean().select('_id');
     const chatIds         = advocateChats.map(c => c._id);
     const pendingMessagesCount = await Message.countDocuments({
       chat:   { $in: chatIds },
       sender: { $ne: userId },
-      readAt: { $exists: false }
+      readAt: null,
     });
 
     // 5. Reviews & rating analytics
-    const allAdvocateReviews = await Review.find({ advocate: advocateId }).lean()
-      .populate('client', 'name avatar')
-      .populate('booking', 'type issue')
-      .sort({ createdAt: -1 })
-      .lean();
-
     const totalReviewCount    = allAdvocateReviews.length;
     const ratingDistribution  = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     let ratingSum             = 0;
@@ -104,10 +109,8 @@ exports.getDashboardStats = async (req, res) => {
     const recentReviews      = allAdvocateReviews.slice(0, 5);
 
     // 6. Earnings from active Bookings (confirmed/completed)
-    const allBookings = await Booking.find({ advocate: advocateId })
-      .select('payment status serviceType consultationMode type createdAt date').lean();
     const activeBookings = allBookings.filter(booking =>
-      ['confirmed', 'completed'].includes(booking.status) && booking.payment?.status === 'paid'
+      ['confirmed', 'in_progress', 'completed'].includes(booking.status) && booking.payment?.status === 'paid'
     );
 
     let dailyEarnings   = 0;
@@ -194,7 +197,7 @@ exports.getDashboardStats = async (req, res) => {
     const summarizePeriod = (start, end) => {
       const periodBookings = allBookings.filter(booking => inRange(booking, start, end));
       const paidBookings = periodBookings.filter(booking =>
-        ['confirmed', 'completed'].includes(booking.status) && booking.payment?.status === 'paid'
+        ['confirmed', 'in_progress', 'completed'].includes(booking.status) && booking.payment?.status === 'paid'
       );
       const completed = periodBookings.filter(booking => booking.status === 'completed').length;
       const pending = periodBookings.filter(booking => ['pending', 'pending_assignment'].includes(booking.status)).length;

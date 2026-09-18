@@ -60,17 +60,21 @@ const EarningsScreen = ({ navigation }) => {
   const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError]   = useState('');
   const [withdrawing, setWithdraw]  = useState(false);
   const [selectedTx, setSelectedTx] = useState(null);
   const [chartFilter, setChartFilter] = useState('Monthly');
 
   const fetchAll = useCallback(async () => {
-    try {
-      const [walletRes, earningsRes] = await Promise.all([
-        api.get('/wallet'),                 // correct: returns { data: { wallet, bankDetails, ... } }
-        api.get('/wallet/earnings'),         // correct: returns { data: [...], monthlyBreakdown: [...] }
-      ]);
+    setLoadError('');
+    const requestConfig = { timeout: 30000, retry: 0 };
+    const [walletResult, earningsResult] = await Promise.allSettled([
+      api.get('/wallet', requestConfig),
+      api.get('/wallet/earnings', requestConfig),
+    ]);
 
+    if (walletResult.status === 'fulfilled') {
+      const walletRes = walletResult.value;
       const wData = walletRes.data?.data || {};
       const w = wData.wallet || {};
       setBalance({
@@ -79,17 +83,23 @@ const EarningsScreen = ({ navigation }) => {
         totalWithdrawn: w.totalWithdrawn || 0,
         totalBookings: wData.totalConsultations || 0,
       });
+    }
 
+    if (earningsResult.status === 'fulfilled') {
+      const earningsRes = earningsResult.value;
       const ePayload = earningsRes.data || {};
       setTx(Array.isArray(ePayload.data) ? ePayload.data.slice(0, 10) : []);
       setMonthly(Array.isArray(ePayload.monthlyBreakdown) ? ePayload.monthlyBreakdown : []);
       setWeekly(Array.isArray(ePayload.weeklyBreakdown) ? ePayload.weeklyBreakdown : []);
       setGrowth(ePayload.growth || 0);
-    } catch (e) {
-      console.error('Wallet fetch error:', e.message);
-      setBalance({ totalEarned: 0, available: 0, totalBookings: 0, totalWithdrawn: 0 });
-      setTx([]); setMonthly([]);
-    } finally { setLoading(false); }
+    }
+
+    if (walletResult.status === 'rejected' || earningsResult.status === 'rejected') {
+      const firstError = walletResult.status === 'rejected' ? walletResult.reason : earningsResult.reason;
+      console.error('Wallet fetch error:', firstError?.message);
+      setLoadError(firstError?.response?.data?.message || 'Could not load all earnings data. Pull down or tap Retry.');
+    }
+    setLoading(false);
   }, []);
 
 
@@ -97,33 +107,11 @@ const EarningsScreen = ({ navigation }) => {
   const onRefresh = async () => { setRefreshing(true); await fetchAll(); setRefreshing(false); };
 
   const handleWithdraw = async () => {
-    if ((balance?.available || 0) < 100) {
-      Alert.alert('Insufficient Balance', 'Minimum withdrawal is ₹100.'); return;
+    if ((balance?.available || 0) < 500) {
+      Alert.alert('Insufficient Balance', 'Minimum withdrawal is ₹500.'); return;
     }
-    let bankDetails = null;
-    try {
-      const res = await api.get('/wallet');
-      bankDetails = (res.data?.data || res.data || {}).bankDetails || null;
-    } catch (e) {}
-
-    if (!bankDetails?.accountNumber) {
-      Alert.alert('Bank Details Required', 'Please save your bank account details in My Wallet before requesting a withdrawal.',
-        [{ text: 'Cancel', style: 'cancel' }, { text: 'Go to Wallet', onPress: () => navigation.navigate('AdvocateWallet') }]);
-      return;
-    }
-
-    Alert.alert('Withdraw Funds',
-      `Available: ${formatINR(balance.available)}\n\nBank: ${bankDetails.bankName} ••••${bankDetails.accountNumber.slice(-4)}\n\nFunds credited in 2-3 business days.`,
-      [{ text: 'Cancel', style: 'cancel' },
-       { text: 'Confirm', onPress: async () => {
-           setWithdraw(true);
-           try {
-             await api.post('/wallet/withdraw', { amount: balance.available });
-             Alert.alert('Request Submitted', 'Funds will be credited in 2-3 business days.');
-             fetchAll();
-           } catch (e) { Alert.alert('Error', e.response?.data?.message || 'Request failed.');
-           } finally { setWithdraw(false); }
-       }}]);
+    // Navigate to the full wallet screen which has the withdrawal form
+    navigation.navigate('AdvocateWallet');
   };
 
   const safeMonthly = Array.isArray(monthly) ? monthly : [];
@@ -169,6 +157,15 @@ const EarningsScreen = ({ navigation }) => {
         contentContainerStyle={[s.scroll, { paddingBottom: Math.max(insets.bottom, 12) + 110 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />}
       >
+        {!!loadError && (
+          <View style={s.loadErrorCard}>
+            <Ionicons name="cloud-offline-outline" size={21} color="#B45309" />
+            <Text style={s.loadErrorText}>{loadError}</Text>
+            <TouchableOpacity style={s.retryButton} onPress={fetchAll}>
+              <Text style={s.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {/* ── Hero Balance Card ─────────────────────────────────────── */}
         <View style={s.heroCard}>
           <View style={s.heroTop}>
@@ -217,7 +214,7 @@ const EarningsScreen = ({ navigation }) => {
         <View style={s.pillsRow}>
           <StatPill label="Available" value={`₹${(balance.available || 0).toLocaleString('en-IN')}`}
             icon="cash-outline" color={COLORS.success} />
-          <StatPill label="Bookings" value={balance.totalBookings || 0}
+          <StatPill label="Bookings" value={String(balance.totalBookings || 0)}
             icon="calendar-outline" color="#3B82F6" />
         </View>
 
@@ -433,6 +430,10 @@ const s = StyleSheet.create({
   // Empty
   emptyBox:  { alignItems: 'center', paddingVertical: 24, gap: 8 },
   emptyText: { fontSize: 12, color: '#A8A29E', fontWeight: '500' },
+  loadErrorCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 14, padding: 12, marginBottom: 14 },
+  loadErrorText: { flex: 1, color: '#92400E', fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  retryButton: { backgroundColor: '#B45309', borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 },
+  retryButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
 
   // Transactions
   txRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderColor: '#F5F5F4' },

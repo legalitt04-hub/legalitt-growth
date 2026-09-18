@@ -16,7 +16,7 @@ exports.getWallet = async (req, res, next) => {
       .lean();
     if (!advocate) return next(new AppError('Advocate profile not found.', 404));
 
-    const recentWithdrawals = await Withdrawal.find({ advocateUser: req.user._id }).lean()
+    const recentWithdrawals = await Withdrawal.find({ advocateUser: req.user._id })
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
@@ -32,36 +32,6 @@ exports.getWallet = async (req, res, next) => {
     const commissionRate = settings?.commissionRate || 20;
 
 
-    // Weekly breakdown (Last 4 weeks)
-    const weeklyMap = {};
-    const msInWeek = 7 * 24 * 60 * 60 * 1000;
-    const now = new Date();
-    // Pre-fill weeks
-    for (let i = 4; i >= 1; i--) {
-      weeklyMap[`W${i}`] = { label: `W${i}`, earnings: 0, count: 0 };
-    }
-    allTxns.forEach(txn => {
-      const d = new Date(txn.creditedAt);
-      const diffTime = now - d;
-      const diffWeeks = Math.floor(diffTime / msInWeek);
-      if (diffWeeks < 4 && diffWeeks >= 0) {
-        const key = `W${4 - diffWeeks}`;
-        weeklyMap[key].earnings += txn.netAmount || 0;
-        weeklyMap[key].count += 1;
-      }
-    });
-
-    // Calculate growth
-    const currentMonthKey = new Date().toLocaleString('en-IN', { month: 'short', year: 'numeric' });
-    const lastMonthDate = new Date();
-    lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
-    const lastMonthKey = lastMonthDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
-    
-    const currentMonthEarnings = monthlyMap[currentMonthKey]?.earnings || 0;
-    const lastMonthEarnings = monthlyMap[lastMonthKey]?.earnings || 0;
-    let growth = 0;
-    if (lastMonthEarnings === 0 && currentMonthEarnings > 0) growth = 100;
-    else if (lastMonthEarnings > 0) growth = Math.round(((currentMonthEarnings - lastMonthEarnings) / lastMonthEarnings) * 100);
 
     res.json({
       success: true,
@@ -272,7 +242,7 @@ exports.getEarnings = async (req, res, next) => {
 
     let pendingExpectedTotal = 0;
     activeBookings.forEach(booking => {
-      const amount = booking.consultationFee || booking.amount || 0;
+      const amount = Number(booking.payment?.amount || booking.consultationFee || booking.amount || 0);
       const expectedNet = amount * (1 - commissionRate / 100);
       pendingExpectedTotal += expectedNet;
       
@@ -305,6 +275,37 @@ exports.getEarnings = async (req, res, next) => {
       monthlyMap[key].count   += 1;
     });
 
+    // Weekly breakdown (Last 4 weeks)
+    const weeklyMap = {};
+    const msInWeek = 7 * 24 * 60 * 60 * 1000;
+    const now = new Date();
+    // Pre-fill weeks
+    for (let i = 4; i >= 1; i--) {
+      weeklyMap[`W${i}`] = { label: `W${i}`, earnings: 0, count: 0 };
+    }
+    allTxns.forEach(txn => {
+      const d = new Date(txn.creditedAt);
+      const diffTime = now - d;
+      const diffWeeks = Math.floor(diffTime / msInWeek);
+      if (diffWeeks < 4 && diffWeeks >= 0) {
+        const key = `W${4 - diffWeeks}`;
+        weeklyMap[key].earnings += txn.netAmount || 0;
+        weeklyMap[key].count += 1;
+      }
+    });
+
+    // Calculate growth
+    const currentMonthKey = new Date().toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+    const lastMonthDate = new Date();
+    lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+    const lastMonthKey = lastMonthDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+
+    const currentMonthEarnings = monthlyMap[currentMonthKey]?.earnings || 0;
+    const lastMonthEarnings = monthlyMap[lastMonthKey]?.earnings || 0;
+    let growth = 0;
+    if (lastMonthEarnings === 0 && currentMonthEarnings > 0) growth = 100;
+    else if (lastMonthEarnings > 0) growth = Math.round(((currentMonthEarnings - lastMonthEarnings) / lastMonthEarnings) * 100);
+
     res.json({
       success: true,
       data: paginated,
@@ -319,8 +320,20 @@ exports.getEarnings = async (req, res, next) => {
         availableBalance: advocate.wallet?.balance        || 0,
         totalConsultations: advocate.totalConsultations   || 0,
       },
-      monthlyBreakdown: Object.values(monthlyMap).slice(0, 6), // Last 6 months
-      weeklyBreakdown: Object.values(weeklyMap),
+      monthlyBreakdown: Object.values(monthlyMap)
+        .sort((a, b) => {
+          // Sort chronologically (oldest → newest) for chart display
+          const parseKey = (k) => {
+            const [mon, yr] = k.split(' ');
+            return new Date(`${mon} 1, ${yr}`);
+          };
+          return parseKey(a.month) - parseKey(b.month);
+        })
+        .slice(-6), // Last 6 months
+      weeklyBreakdown: Object.values(weeklyMap).sort((a, b) => {
+        // W1 = oldest week, W4 = most recent — sort ascending
+        return a.label.localeCompare(b.label);
+      }),
       growth
     });
   } catch (err) {
