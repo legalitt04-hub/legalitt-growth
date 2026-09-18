@@ -492,14 +492,16 @@ export default function LegalNoticeResponseScreen({ navigation, route }) {
                   </TouchableOpacity>
 
                   {draftText ? (
-                    <TouchableOpacity style={s.outlineBtn} onPress={handleSaveToDevice} activeOpacity={0.8} style={[{marginRight: 10}, s.clearBtn]}>
-                      <Ionicons name="download-outline" size={15} color={T.primary} />
-                      <Text style={[s.clearBtnText, {color: T.primary}]}>Save to Device</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.clearBtn} onPress={() => { setDraftText(''); setAiGenerated(false); }}>
-                      <Ionicons name="refresh-outline" size={15} color={T.muted} />
-                      <Text style={s.clearBtnText}>Clear</Text>
-                    </TouchableOpacity>
+                    <>
+                      <TouchableOpacity style={[{marginRight: 10}, s.clearBtn]} onPress={handleSaveToDevice} activeOpacity={0.8}>
+                        <Ionicons name="download-outline" size={15} color={T.primary} />
+                        <Text style={[s.clearBtnText, {color: T.primary}]}>Save to Device</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.clearBtn} onPress={() => { setDraftText(''); setAiGenerated(false); }}>
+                        <Ionicons name="refresh-outline" size={15} color={T.muted} />
+                        <Text style={s.clearBtnText}>Clear</Text>
+                      </TouchableOpacity>
+                    </>
                   ) : null}
                 </View>
 
