@@ -55,6 +55,9 @@ const EarningsScreen = ({ navigation }) => {
   const [balance, setBalance]       = useState({ totalEarned: 0, available: 0, totalBookings: 0 });
   const [transactions, setTx]       = useState([]);
   const [monthly, setMonthly]       = useState([]);
+  const [weekly, setWeekly]         = useState([]);
+  const [growth, setGrowth]         = useState(0);
+  const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [withdrawing, setWithdraw]  = useState(false);
@@ -80,6 +83,8 @@ const EarningsScreen = ({ navigation }) => {
       const ePayload = earningsRes.data || {};
       setTx(Array.isArray(ePayload.data) ? ePayload.data.slice(0, 10) : []);
       setMonthly(Array.isArray(ePayload.monthlyBreakdown) ? ePayload.monthlyBreakdown : []);
+      setWeekly(Array.isArray(ePayload.weeklyBreakdown) ? ePayload.weeklyBreakdown : []);
+      setGrowth(ePayload.growth || 0);
     } catch (e) {
       console.error('Wallet fetch error:', e.message);
       setBalance({ totalEarned: 0, available: 0, totalBookings: 0, totalWithdrawn: 0 });
@@ -124,15 +129,9 @@ const EarningsScreen = ({ navigation }) => {
   const safeMonthly = Array.isArray(monthly) ? monthly : [];
   
   // Generate pseudo-weekly data for UI since backend only returns monthly
-  const generateWeekly = () => {
-    const w = [];
-    const avg = balance.totalEarned / 4 || 1000;
-    for(let i=4; i>=1; i--) w.push({ label: `W${i}`, earnings: Math.max(0, avg + (Math.random()*avg - avg/2)) });
-    return w;
-  };
-  const weeklyData = generateWeekly();
+  
 
-  const currentChartData = chartFilter === 'Weekly' ? weeklyData : safeMonthly;
+  const currentChartData = chartFilter === 'Weekly' ? (weekly.length ? weekly : []) : safeMonthly;
   const currentMaxVal = currentChartData.length > 0 ? Math.max(...currentChartData.map(m => m.earnings || 0), 1) : 1;
   
   // Backend returns { month, earnings, count } — not { total }
@@ -208,7 +207,7 @@ const EarningsScreen = ({ navigation }) => {
             </View>
             <View style={s.heroStatDivider} />
             <View style={s.heroStatItem}>
-              <Text style={[s.heroStatVal, { color: COLORS.success }]}>+15%</Text>
+              <Text style={[s.heroStatVal, { color: growth >= 0 ? COLORS.success : "#EF4444" }]}>{growth > 0 ? "+" : ""}{growth}%</Text>
               <Text style={s.heroStatLabel}>Growth</Text>
             </View>
           </View>
@@ -225,7 +224,7 @@ const EarningsScreen = ({ navigation }) => {
         {/* ── Monthly Earnings Bar Chart ────────────────────────────── */}
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <Text style={s.cardTitle}>Monthly Earnings</Text>
+            <Text style={s.cardTitle}>{chartFilter} Earnings {selectedPeriod ? `(${selectedPeriod.month || selectedPeriod.label}: ₹${selectedPeriod.earnings})` : ''}</Text>
             <Ionicons name="bar-chart-outline" size={16} color={COLORS.primary} />
           </View>
           {currentChartData.length === 0 ? (
@@ -236,15 +235,15 @@ const EarningsScreen = ({ navigation }) => {
           ) : (
             <View style={s.chartRow}>
               {currentChartData.map((m, i) => {
-                const isActive = chartFilter === 'Monthly' ? m.month?.toUpperCase()?.includes(curMonth) : i === currentChartData.length - 1;
+                const isActive = selectedPeriod ? (m.month === selectedPeriod.month && m.label === selectedPeriod.label) : (chartFilter === 'Monthly' ? m.month?.toUpperCase()?.includes(curMonth) : i === currentChartData.length - 1);
                 return (
-                  <View key={i} style={s.barWrap}>
+                  <TouchableOpacity key={i} style={s.barWrap} onPress={() => setSelectedPeriod(m)} activeOpacity={0.7}>
                     <View style={s.barBg}>
                       <View style={[s.bar, { height: `${((m.earnings || 0) / currentMaxVal) * 100}%` },
                         isActive ? s.barActive : s.barInactive]} />
                     </View>
                     <Text style={[s.barLabel, isActive && s.barLabelActive]}>{m.month || m.label}</Text>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>

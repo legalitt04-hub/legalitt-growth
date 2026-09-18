@@ -31,6 +31,38 @@ exports.getWallet = async (req, res, next) => {
     const settings = await Settings.findOne().lean();
     const commissionRate = settings?.commissionRate || 20;
 
+
+    // Weekly breakdown (Last 4 weeks)
+    const weeklyMap = {};
+    const msInWeek = 7 * 24 * 60 * 60 * 1000;
+    const now = new Date();
+    // Pre-fill weeks
+    for (let i = 4; i >= 1; i--) {
+      weeklyMap[`W${i}`] = { label: `W${i}`, earnings: 0, count: 0 };
+    }
+    allTxns.forEach(txn => {
+      const d = new Date(txn.creditedAt);
+      const diffTime = now - d;
+      const diffWeeks = Math.floor(diffTime / msInWeek);
+      if (diffWeeks < 4 && diffWeeks >= 0) {
+        const key = `W${4 - diffWeeks}`;
+        weeklyMap[key].earnings += txn.netAmount || 0;
+        weeklyMap[key].count += 1;
+      }
+    });
+
+    // Calculate growth
+    const currentMonthKey = new Date().toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+    const lastMonthDate = new Date();
+    lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+    const lastMonthKey = lastMonthDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+    
+    const currentMonthEarnings = monthlyMap[currentMonthKey]?.earnings || 0;
+    const lastMonthEarnings = monthlyMap[lastMonthKey]?.earnings || 0;
+    let growth = 0;
+    if (lastMonthEarnings === 0 && currentMonthEarnings > 0) growth = 100;
+    else if (lastMonthEarnings > 0) growth = Math.round(((currentMonthEarnings - lastMonthEarnings) / lastMonthEarnings) * 100);
+
     res.json({
       success: true,
       data: {
@@ -288,6 +320,8 @@ exports.getEarnings = async (req, res, next) => {
         totalConsultations: advocate.totalConsultations   || 0,
       },
       monthlyBreakdown: Object.values(monthlyMap).slice(0, 6), // Last 6 months
+      weeklyBreakdown: Object.values(weeklyMap),
+      growth
     });
   } catch (err) {
     next(err);
