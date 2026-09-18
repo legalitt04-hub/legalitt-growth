@@ -527,46 +527,55 @@ const CaseDetailScreen = ({ route, navigation }) => {
 
             {/* Legal Notice Response Workflow Module */}
             {(['legal_notice', 'legal_advice'].includes(legalCase.serviceType) || ['legal_notice', 'legal_advice'].includes(booking?.serviceType)) && (
-            <Section title={legalCase.serviceType === 'legal_advice' ? '⚖️ Legal Advice Workspace' : '⚖️ Legal Notice & Response'}>
-              <View style={styles.legalNoticePromoCard}>
-                <View style={styles.legalNoticePromoLeft}>
-                  <Text style={styles.legalNoticePromoTitle}>
-                    {legalCase.serviceType === 'legal_advice' ? 'Legal Advice & Opinion' : 'Legal Notice Response'}
-                  </Text>
-
-                  <Text style={styles.legalNoticePromoSub}>
-                    {legalCase.serviceType === 'legal_advice'
-                      ? 'Review documents, draft advice with AI, and share the final opinion'
-                      : 'Prepare, draft with AI, sign & submit formal response'}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.legalNoticePromoBtn}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    const legalNoticeBookingId = booking?._id || legalCase.bookingId || (legalCase.isBooking ? legalCase._id : null);
-                    if (!legalNoticeBookingId) {
-                      Alert.alert('Booking unavailable', 'Open this workflow from an assigned legal notice booking.');
-                      return;
-                    }
-                    const doc = legalCase.documents?.[0] || clientDocs?.[0] || null;
-                    navigation.navigate('LegalNoticeResponse', {
-                      bookingId: legalNoticeBookingId,
-                      caseId: legalNoticeBookingId,
-                      clientId: legalCase.client?._id,
-                      clientName: legalCase.client?.name,
-                      caseTitle: legalCase.issue || legalCase.title,
-                      serviceType: legalCase.serviceType || booking?.serviceType || 'legal_notice',
-                      documentUrl: doc?.url,
-                      documentName: doc?.name,
-                      advocateDocs: legalCase.advocateDocuments || [],
-                    });
-                  }}
-                >
-                  <Text style={styles.legalNoticePromoBtnText}>Open Workflow →</Text>
-                </TouchableOpacity>
-              </View>
-            </Section>
+              legalCase.status === 'cancelled' ? (
+                <Section title="⚖️ Workflow Status">
+                  <View style={[styles.legalNoticePromoCard, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5', justifyContent: 'center', paddingVertical: 16 }]}>
+                    <Text style={{ color: '#B91C1C', fontWeight: '800', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      ❌ Consultation Rejected
+                    </Text>
+                  </View>
+                </Section>
+              ) : (
+                <Section title={legalCase.serviceType === 'legal_advice' ? '⚖️ Legal Advice Workspace' : '⚖️ Legal Notice & Response'}>
+                  <View style={styles.legalNoticePromoCard}>
+                    <View style={styles.legalNoticePromoLeft}>
+                      <Text style={styles.legalNoticePromoTitle}>
+                        {legalCase.serviceType === 'legal_advice' ? 'Legal Advice & Opinion' : 'Legal Notice Response'}
+                      </Text>
+                      <Text style={styles.legalNoticePromoSub}>
+                        {legalCase.serviceType === 'legal_advice'
+                          ? 'Review documents, draft advice with AI, and share the final opinion'
+                          : 'Prepare, draft with AI, sign & submit formal response'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.legalNoticePromoBtn}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        const legalNoticeBookingId = booking?._id || legalCase.bookingId || (legalCase.isBooking ? legalCase._id : null);
+                        if (!legalNoticeBookingId) {
+                          Alert.alert('Booking unavailable', 'Open this workflow from an assigned legal notice booking.');
+                          return;
+                        }
+                        const doc = legalCase.documents?.[0] || clientDocs?.[0] || null;
+                        navigation.navigate('LegalNoticeResponse', {
+                          bookingId: legalNoticeBookingId,
+                          caseId: legalNoticeBookingId,
+                          clientId: legalCase.client?._id,
+                          clientName: legalCase.client?.name,
+                          caseTitle: legalCase.issue || legalCase.title,
+                          serviceType: legalCase.serviceType || booking?.serviceType || 'legal_notice',
+                          documentUrl: doc?.url,
+                          documentName: doc?.name,
+                          advocateDocs: legalCase.advocateDocuments || [],
+                        });
+                      }}
+                    >
+                      <Text style={styles.legalNoticePromoBtnText}>Open Workflow →</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Section>
+              )
             )}
           </>
         )}
