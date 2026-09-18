@@ -467,7 +467,7 @@ export default function MyBookingsScreen({ navigation }) {
 
         {/* Chat / Call buttons */}
         <View style={styles.actionsRow}>
-          {item.chat && (
+          {item.status !== 'cancelled' && item.status !== 'failed' && item.chat && (
             <TouchableOpacity style={styles.chatBtn}
               onPress={() => handleOpenSession('chat', item, {
                 chatId:        item.chat,
@@ -487,7 +487,7 @@ export default function MyBookingsScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
-          {(mode === 'voice' || mode === 'video') && (
+          {item.status !== 'cancelled' && item.status !== 'failed' && (mode === 'voice' || mode === 'video') && (
             <TouchableOpacity
               style={[styles.callBtn, styles.videoBtn]}
               onPress={() => {

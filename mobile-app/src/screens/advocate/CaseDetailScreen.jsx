@@ -378,17 +378,23 @@ const CaseDetailScreen = ({ route, navigation }) => {
               <Text style={styles.clientMeta}>Contact protected · In-app chat enabled</Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity 
-                style={[styles.callBtn, { backgroundColor: COLORS.primary }]}
-                onPress={handleMessagePress}
-                disabled={loadingChat}
-              >
-                {loadingChat ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="chatbubble-ellipses" size={16} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
+              {legalCase.status === 'cancelled' ? (
+                <View style={[styles.callBtn, { backgroundColor: '#F3F4F6' }]}>
+                  <Ionicons name="chatbubble-ellipses" size={16} color="#9CA3AF" />
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={[styles.callBtn, { backgroundColor: COLORS.primary }]}
+                  onPress={handleMessagePress}
+                  disabled={loadingChat}
+                >
+                  {loadingChat ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="chatbubble-ellipses" size={16} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </Section>
