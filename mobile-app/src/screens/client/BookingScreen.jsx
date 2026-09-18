@@ -87,7 +87,8 @@ const BookingScreen = ({ route, navigation }) => {
         issue: issue.trim(),
         date: selectedDate,
         timeSlot: { startTime: selectedTime, endTime: selectedTime },
-        type: 'in_person', // default in backend
+        type: 'video',             // Allow video/voice calls
+        consultationMode: 'video', // Required for canJoinCall to allow call access
       });
 
       // Navigate to payment checkout
@@ -105,6 +106,7 @@ const BookingScreen = ({ route, navigation }) => {
       setLoading(false);
     }
   };
+
 
   return (
     <KeyboardAvoidingView 

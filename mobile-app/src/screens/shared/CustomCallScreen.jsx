@@ -9,6 +9,7 @@ import {
   Platform, PermissionsAndroid, StatusBar, Animated, Easing, Alert,
   findNodeHandle
 } from 'react-native';
+import Constants from 'expo-constants';
 import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -199,7 +200,7 @@ export default function CustomCallScreen({ navigation, route }) {
         // 2. Create engine
         const engine = await ZegoExpressEngine.createEngineWithProfile({
           appID,
-          appSign: '',
+          appSign: String(Constants.expoConfig?.extra?.ZEGO_APP_SIGN || ''),
           scenario: 0,
         });
         engineRef.current = engine;

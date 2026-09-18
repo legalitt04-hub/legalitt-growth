@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { uploadAPI, legalAdviceAPI, paymentAPI } from '../../services/api';
 import RazorpayCheckout from 'react-native-razorpay';
 import { usePricing } from '../../context/PricingContext';
+import TestModeBanner from '../../components/TestModeBanner';
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE_MB = 10;
@@ -198,6 +199,7 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
         paymentData = await RazorpayCheckout.open(razorpayOptions);
       } catch (rzpErr) {
         if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description === 'Payment cancelled by user.') {
+          setSubmitting(false); // ← Fix: was missing, button stayed stuck in "Processing..."
           Alert.alert('Payment Cancelled', 'You cancelled the payment. Your request was not submitted.');
           return;
         }
@@ -227,11 +229,12 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
     } catch (err) {
       // Razorpay cancelled by user
       if (err?.code === 'PAYMENT_CANCELLED' || err?.description === 'Payment cancelled by user.') {
+        setSubmitting(false);
         Alert.alert('Payment Cancelled', 'You cancelled the payment. Your request has not been submitted.');
         return;
       }
 
-      // Razorpay native error (e.g. bad key, network issue during checkout)
+      // Razorpay native error (bad key, network issue during checkout)
       if (err?.code !== undefined && err?.description) {
         Alert.alert(
           'Payment Failed',
@@ -400,6 +403,7 @@ export default function ConsultationDetailsScreen({ navigation, route }) {
         </ScrollView>
 
         <View style={styles.bottomFooter}>
+          <TestModeBanner />
           <PrimaryButton
             title={submitting ? 'Processing...' : `Proceed to Pay ₹${selectedType.price}`}
             onPress={handleContinue}

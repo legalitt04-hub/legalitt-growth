@@ -82,7 +82,9 @@
       "SOCKET_URL": "https://legalitt-growth.onrender.com",
       "GOOGLE_WEB_CLIENT_ID": "400989529051-9r050me1vuquck9bqk30b6pd1i97k817.apps.googleusercontent.com",
       "GOOGLE_ANDROID_CLIENT_ID": "400989529051-5jmb7omhkks18b28oqf20b6nk19ggn3u.apps.googleusercontent.com",
-      "RAZORPAY_KEY_ID": "rzp_test_SeC9MGzYmAerqz",
+      "RAZORPAY_KEY_ID": "rzp_test_TdFNNVrnjh31Q3",
+      "ZEGO_APP_ID": 954831467,
+      "ZEGO_APP_SIGN": "6aaa4f1b530a5ddff76b050d56a56974101548cf30d10b1c547feb7da07b16ad",
       "eas": {
         "projectId": "53a94562-25bc-4f1c-af15-ec4c792696dc"
       }

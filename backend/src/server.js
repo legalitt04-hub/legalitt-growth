@@ -18,6 +18,22 @@ const start = async () => {
 
   server.listen(PORT, '0.0.0.0', () => {
     logger.info(`Server running on port ${PORT} [${process.env.NODE_ENV}]`);
+
+    // ── Keep-alive ping to prevent Render free-tier cold starts ──────────────
+    // Render spins down after ~15min of inactivity. This self-ping every 14min
+    // keeps the server warm so payment/AI calls never hit cold-start timeouts.
+    if (process.env.NODE_ENV === 'production' && process.env.RENDER_EXTERNAL_URL) {
+      const keepAliveUrl = `${process.env.RENDER_EXTERNAL_URL}/health`;
+      setInterval(async () => {
+        try {
+          const res = await fetch(keepAliveUrl, { signal: AbortSignal.timeout(10000) });
+          logger.info(`[Keep-alive] Pinged ${keepAliveUrl} — ${res.status}`);
+        } catch (e) {
+          logger.warn(`[Keep-alive] Ping failed: ${e.message}`);
+        }
+      }, 14 * 60 * 1000); // 14 minutes
+      logger.info(`[Keep-alive] Self-ping enabled → ${keepAliveUrl}`);
+    }
   });
 
   // Graceful shutdown

@@ -17,6 +17,7 @@ import { legalAdviceAPI, paymentAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import RazorpayCheckout from 'react-native-razorpay';
 import { usePricing } from '../../context/PricingContext';
+import TestModeBanner from '../../components/TestModeBanner';
 
 const PRIMARY_BEIGE = '#C2A98B';
 
@@ -218,6 +219,8 @@ export default function PropertyResearchPaymentScreen({ navigation, route }) {
 
         {/* Payment Methods Selector */}
         <Text style={styles.sectionHeaderTitle}>Select Payment Method</Text>
+
+        <TestModeBanner />
 
         <View style={styles.methodsContainer}>
           {PAYMENT_METHODS.map((method) => {

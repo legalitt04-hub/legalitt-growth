@@ -110,6 +110,33 @@ exports.requestWithdrawal = async (req, res, next) => {
     advocate.wallet.pendingWithdrawal = (advocate.wallet.pendingWithdrawal || 0) + amount;
     await advocate.save();
 
+    // ── Real-time: notify admin panel via socket ───────────────────────────
+    try {
+      const { getIO } = require('../config/socket');
+      getIO().to('admin_room').emit('new_withdrawal_request', {
+        withdrawalId: withdrawal._id.toString(),
+        amount,
+        advocateName: req.user.name,
+        requestedAt:  withdrawal.createdAt,
+      });
+    } catch (_) {}
+
+    // ── In-app notification to super_admin ────────────────────────────────
+    try {
+      const User = require('../models/User');
+      const { createNotification } = require('../utils/notificationHelper');
+      const admins = await User.find({ role: { $in: ['super_admin', 'admin', 'superadmin', 'accounts'] } }).select('_id').lean();
+      await Promise.all(admins.map(admin =>
+        createNotification({
+          recipientId: admin._id,
+          title:       '💸 New Withdrawal Request',
+          message:     `${req.user.name} has requested a withdrawal of ₹${amount}. Review in admin panel.`,
+          type:        'payment',
+          data:        { withdrawalId: withdrawal._id },
+        })
+      ));
+    } catch (_) {}
+
     logger.info(`Withdrawal request ₹${amount} by advocate ${req.user.email}`);
 
     res.status(201).json({

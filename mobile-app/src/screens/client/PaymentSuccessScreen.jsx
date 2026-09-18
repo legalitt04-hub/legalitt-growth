@@ -14,7 +14,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../../constants/theme';
 
 const PaymentSuccessScreen = ({ navigation, route }) => {
-  const { amount = 800, chatId, advocateName, advocateAvatar, advocateId } = route?.params || {};
+  const {
+    amount = 800, chatId, advocateName, advocateAvatar, advocateId,
+    bookingId, zegoRoomId, zegoToken, zegoAppId,
+    sessionExpiresAt, consultationMode,
+  } = route?.params || {};
   
   // Animation values
   const scaleAnim = React.useRef(new Animated.Value(0)).current;
@@ -95,7 +99,18 @@ const PaymentSuccessScreen = ({ navigation, route }) => {
         <Animated.View style={{ opacity: buttonFadeAnim, width: '100%' }}>
           <TouchableOpacity
             style={styles.primaryButtonWrapper}
-            onPress={() => navigation.navigate('Chat', { chatId, advocateName, advocateAvatar, advocateId })}
+            onPress={() => navigation.navigate('Chat', {
+              chatId,
+              advocateName,
+              advocateAvatar,
+              advocateId,
+              bookingId,
+              zegoRoomId,
+              zegoToken,
+              zegoAppId,
+              sessionExpiresAt,   // ← admin-configured timer
+              mode: consultationMode || 'chat',
+            })}
             activeOpacity={0.9}
           >
             <LinearGradient

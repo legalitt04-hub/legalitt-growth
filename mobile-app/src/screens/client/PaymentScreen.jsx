@@ -1,5 +1,5 @@
 // screens/client/PaymentScreen.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,19 +15,37 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { paymentAPI, bookingAPI } from '../../services/api';
+import api from '../../services/api';
 import RazorpayCheckout from 'react-native-razorpay';
+import TestModeBanner from '../../components/TestModeBanner';
 
 const PaymentScreen = ({ navigation, route }) => {
   const { isAuthenticated, user } = useAuth();
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState('select'); // 'select' | 'processing' | 'verifying'
+  const [step, setStep] = useState('select'); // 'select' | 'waking' | 'processing' | 'verifying'
+  const [serverReady, setServerReady] = useState(false);
 
-  // Get parameters
+
   const { bookingId, amount, advocateName, advocateAvatar, advocateId } = route?.params || {};
   const consultationFee = amount || route?.params?.fee || 800;
   const platformFee = 0;
   const totalAmount = consultationFee + platformFee;
+
+  // ── Wake up the Render server as soon as screen loads ───────────────────────────
+  useEffect(() => {
+    const wakeServer = async () => {
+      try {
+        await api.get('/auth/me', { timeout: 30000 });
+        setServerReady(true);
+      } catch {
+        // Non-blocking — will try again on payment press
+        setServerReady(true);
+      }
+    };
+    wakeServer();
+  }, []);
+
 
   const paymentMethods = [
     {
@@ -67,10 +85,25 @@ const PaymentScreen = ({ navigation, route }) => {
     setLoading(true);
     setStep('processing');
     try {
-      // ── Step 1: Create Razorpay order on backend ────────────────────────────
-      const orderRes = await paymentAPI.createOrder(bookingId);
+      // ── Step 1: Create Razorpay order on backend ────────────────────────────────
+      let orderRes;
+      try {
+        orderRes = await paymentAPI.createOrder(bookingId);
+      } catch (orderErr) {
+        // If server is waking up (503/network), retry once after 3 seconds
+        const status = orderErr.response?.status;
+        if (status === 503 || !orderErr.response) {
+          setStep('waking');
+          await new Promise(r => setTimeout(r, 4000));
+          setStep('processing');
+          orderRes = await paymentAPI.createOrder(bookingId);
+        } else {
+          throw orderErr;
+        }
+      }
+
       if (!orderRes.data?.success) {
-        throw new Error('Failed to create payment order. Please try again.');
+        throw new Error(orderRes.data?.message || 'Failed to create payment order. Please try again.');
       }
 
       const { orderId, amount: orderAmount, currency, keyId } = orderRes.data.data;
@@ -83,7 +116,7 @@ const PaymentScreen = ({ navigation, route }) => {
         currency: currency || 'INR',
         name: 'Legalitt Legal Services',
         description: `Consultation with ${advocateName || 'Advocate'}`,
-        image: 'https://legalitt-growth.onrender.com/logo.png',
+        image: 'https://i.imgur.com/3g7nmJC.png',
         prefill: {
           name: user?.name || '',
           email: user?.email || '',
@@ -113,10 +146,12 @@ const PaymentScreen = ({ navigation, route }) => {
       if (verifyRes.data?.success) {
         const respData = verifyRes.data?.data || {};
         const updatedBooking = respData.booking;
-        const chatId    = updatedBooking?.chat || respData.chatId;
-        const zegoRoomId = updatedBooking?.videoRoomId || respData.zegoRoomId || null;
-        const zegoToken  = updatedBooking?.videoRoomToken || respData.zegoToken || null;
-        const zegoAppId  = updatedBooking?.zegoAppId || respData.zegoAppId || 0;
+        const chatId           = updatedBooking?.chat || respData.chatId;
+        const zegoRoomId       = updatedBooking?.videoRoomId || respData.zegoRoomId || null;
+        const zegoToken        = updatedBooking?.videoRoomToken || respData.zegoToken || null;
+        const zegoAppId        = updatedBooking?.zegoAppId || respData.zegoAppId || 0;
+        const sessionExpiresAt = respData.sessionExpiresAt || updatedBooking?.sessionExpiresAt || null;
+        const consultationMode = updatedBooking?.consultationMode || null;
 
         navigation.replace('PaymentSuccess', {
           amount: totalAmount,
@@ -129,6 +164,8 @@ const PaymentScreen = ({ navigation, route }) => {
           zegoRoomId,
           zegoToken,
           zegoAppId,
+          sessionExpiresAt,   // ← admin-set timer
+          consultationMode,   // ← for timer label
         });
       } else {
         throw new Error('Payment verification failed. Contact support if amount was deducted.');
@@ -144,18 +181,29 @@ const PaymentScreen = ({ navigation, route }) => {
         error.response?.data?.message ||
         error.message ||
         'Payment could not be completed. Please try again.';
-      Alert.alert('Payment Failed', msg);
+      Alert.alert(
+        'Payment Failed',
+        msg,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Try Again', onPress: handlePayment },
+        ]
+      );
     } finally {
       setLoading(false);
       setStep('select');
     }
   };
 
-  const stepLabel = step === 'processing'
-    ? 'Creating order…'
-    : step === 'verifying'
-    ? 'Verifying payment…'
-    : null;
+  const stepLabel =
+    step === 'waking'
+      ? 'Connecting to server…'
+      : step === 'processing'
+      ? 'Creating order…'
+      : step === 'verifying'
+      ? 'Verifying payment…'
+      : null;
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -183,6 +231,9 @@ const PaymentScreen = ({ navigation, route }) => {
         <View style={styles.logoContainer}>
           <Text style={styles.logoText}>⚡ Razorpay</Text>
         </View>
+
+        {/* TEST MODE BANNER */}
+        <TestModeBanner />
 
         {/* Fee Breakdown Card */}
         <View style={styles.feeCard}>
@@ -425,6 +476,44 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // ── Test Mode Banner ───────────────────────────────────────────────────────
+  testBanner: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
+    padding: 14,
+    marginBottom: 16,
+  },
+  testBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 4,
+  },
+  testBannerText: {
+    fontSize: 11,
+    color: '#78350F',
+    marginBottom: 8,
+  },
+  testCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  testCardLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#92400E',
+    width: 60,
+  },
+  testCardValue: {
+    fontSize: 11,
+    color: '#1F2937',
+    fontWeight: '500',
+    flex: 1,
+    textAlign: 'right',
   },
 });
 

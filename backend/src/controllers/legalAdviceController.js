@@ -185,7 +185,10 @@ exports.confirmLegalPayment = async (req, res, next) => {
         data: { bookingId: booking._id, status: booking.status, paymentStatus: 'paid' },
       });
     }
-    if (booking.payment?.razorpayOrderId !== razorpayOrderId) {
+
+    // Allow null/undefined savedOrderId (cold-start race condition — trust HMAC instead)
+    const savedOrderId = booking.payment?.razorpayOrderId;
+    if (savedOrderId && savedOrderId !== razorpayOrderId) {
       return next(new AppError('Order ID mismatch.', 400));
     }
 
@@ -342,17 +345,33 @@ exports.generateAdvocateLegalNoticeDraft = async (req, res, next) => {
     const { callAI } = require('../services/aiService');
     const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const isNotice = booking.serviceType === 'legal_notice';
-    const prompt = `You are a senior Indian advocate drafting ${isNotice ? 'a formal response to a legal notice' : 'a clear written legal advice memorandum'}.
-Client: ${booking.client?.name || 'Client'}
+
+    // System prompt — same AI persona as the AI Assistant feature
+    const systemPrompt = `You are a senior Indian advocate with 20+ years of experience.
+Draft documents in proper Indian legal format: formal language, numbered paragraphs, correct headings, reservation of rights clause, and professional closing.
+Do NOT invent facts. Mark missing information with clear placeholders like [Client Address], [Court Name], etc.
+Use Indian legal statutes where applicable (IPC, CPC, IEA, Registration Act, Consumer Protection Act, etc.).`;
+
+    const userPrompt = `Draft ${isNotice
+  ? 'a formal professional response to the legal notice received by the client'
+  : 'a clear written legal advice memorandum for the client'
+}.
+
+Client Name: ${booking.client?.name || 'Client'}
 Matter: ${booking.issue || booking.issueDescription || 'Legal matter'}
 Date: ${today}
-Additional instructions: ${String(req.body.instructions || '').slice(0, 1000)}
+${req.body.instructions ? `Advocate's additional instructions: ${String(req.body.instructions).slice(0, 1000)}` : ''}
 
 ${isNotice
-  ? 'Draft a professional response in Indian legal format with a heading, addressee placeholders, subject, numbered paragraphs, reservation of rights, and professional closing.'
-  : 'Draft a professional advice note with facts provided, issues, applicable legal principles, practical options, risks, recommended next steps, and a professional disclaimer.'}
-Do not invent facts; mark missing facts with clear placeholders.`;
-    const draft = await callAI([{ role: 'user', content: prompt }]);
+  ? 'Include: proper heading, sender/recipient placeholders, subject line, numbered paragraphs denying liability, request for supporting documents, reservation of all legal rights, and professional closing signature block.'
+  : 'Include: Facts Provided, Issues for Review, Applicable Legal Principles (cite specific Indian statutes), Practical Options, Risks & Limitations, and Recommended Next Steps.'}`;
+
+    const draft = await callAI([
+      { role: 'user', content: systemPrompt },          // System context as first user message
+      { role: 'assistant', content: 'Understood. I will draft the document professionally in Indian legal format.' },
+      { role: 'user', content: userPrompt },
+    ]);
+
     booking.aiDraft = draft;
     if (booking.status === 'confirmed' || booking.status === 'pending') booking.status = 'in_progress';
     await booking.save();

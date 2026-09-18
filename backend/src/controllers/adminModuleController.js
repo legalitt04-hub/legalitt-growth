@@ -594,6 +594,7 @@ exports.getCalendarEvents = async (req, res, next) => {
       mode: booking.consultationMode || 'chat',
       location: booking.consultationMode === 'in_person' ? 'In-person consultation' : `${booking.consultationMode || 'chat'} consultation`,
       advocateName: booking.advocate?.user?.name || '', status: booking.status,
+      sessionExpiresAt: booking.sessionExpiresAt || null, // ← for admin timer pill
     }));
     const hearingEvents = cases.flatMap(caseItem => (caseItem.timeline || []).filter(item => item.date >= from && item.date <= to).map(item => ({
       id: `case-${caseItem._id}-${item._id}`, sourceId: caseItem._id, source: 'case', title: `${caseItem.title}: ${item.title}`,

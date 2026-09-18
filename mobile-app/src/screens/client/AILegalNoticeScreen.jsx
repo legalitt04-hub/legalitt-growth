@@ -21,6 +21,7 @@ import { legalAdviceAPI, paymentAPI, uploadAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import RazorpayCheckout from 'react-native-razorpay';
 import { usePricing } from '../../context/PricingContext';
+import TestModeBanner from '../../components/TestModeBanner';
 
 const { width } = Dimensions.get('window');
 
@@ -251,7 +252,7 @@ export default function AILegalNoticeScreen({ navigation }) {
         });
       } catch (rzpErr) {
         if (rzpErr?.code === 'PAYMENT_CANCELLED' || rzpErr?.description?.includes('cancel')) {
-          setIsSubmitting(false);
+          setIsSubmitting(false); // ← Fix: button was stuck in spinner after cancel
           Alert.alert('Payment Cancelled', 'You cancelled the payment. Request not submitted.');
           return;
         }
@@ -647,6 +648,7 @@ export default function AILegalNoticeScreen({ navigation }) {
 
             {/* Bottom Button */}
             <View style={styles.bottomArea}>
+              {currentStep === 5 && <TestModeBanner />}
               <TouchableOpacity
                 style={styles.ctaButton}
                 onPress={currentStep === 5 ? handleSubmitReview : handleNextStep}

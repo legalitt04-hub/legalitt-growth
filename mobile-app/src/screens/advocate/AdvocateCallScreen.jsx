@@ -32,10 +32,11 @@ try {
 // ── Zego credentials ──────────────────────────────────────────────────────
 function resolveAppId(param) {
   const fromParam = Number(param);
-  return fromParam > 0 ? fromParam : 0;
+  return fromParam > 0 ? fromParam : Number(Constants.expoConfig?.extra?.ZEGO_APP_ID) || 0;
 }
-function resolveAppSign() {
-  return '';
+function resolveAppSign(param) {
+  if (param && param.length >= 32) return param;
+  return String(Constants.expoConfig?.extra?.ZEGO_APP_SIGN || '');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ export default function AdvocateCallScreen({ navigation, route }) {
   const callStartRef = useRef(Date.now());
 
   const effectiveAppId   = resolveAppId(zegoAppId);
-  const effectiveAppSign = resolveAppSign();
+  const effectiveAppSign = resolveAppSign(route?.params?.zegoAppSign);
   const zegoRoomId       = paramRoomId || (bookingId ? `legalitt-${bookingId}` : null);
   const isCallReady      = !!zegoRoomId && effectiveAppId > 0 && !!zegoToken && !!stableUserIdRef.current;
 

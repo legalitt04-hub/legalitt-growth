@@ -35,10 +35,15 @@ try {
 // ── Zego credentials ────────────────────────────────────────────────────────
 function resolveAppId(param?: any): number {
   const fromParam = Number(param);
-  return fromParam > 0 ? fromParam : 0;
+  if (fromParam > 0) return fromParam;
+  // Fallback: read from app.json extra
+  const fromEnv = Number(Constants.expoConfig?.extra?.ZEGO_APP_ID);
+  return fromEnv > 0 ? fromEnv : 0;
 }
-function resolveAppSign(): string {
-  return '';
+function resolveAppSign(param?: string): string {
+  if (param && param.length >= 32) return param;
+  // Fallback: read from app.json extra
+  return String(Constants.expoConfig?.extra?.ZEGO_APP_SIGN || '');
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -63,7 +68,7 @@ export default function VideoCallScreen({ navigation, route }: any) {
   );
 
   const effectiveAppId   = resolveAppId(zegoAppId);
-  const effectiveAppSign = resolveAppSign();
+  const effectiveAppSign = resolveAppSign(route?.params?.zegoAppSign);
   const effectiveRoomId  = zegoRoomId || (bookingId ? `legalitt-${bookingId}` : null);
   const isCallReady      = !!effectiveRoomId && effectiveAppId > 0 && !!zegoToken && !!stableUserIdRef.current;
 

@@ -22,6 +22,7 @@ const ChatScreen = ({ navigation, route }) => {
     chatId, advocateName, advocateAvatar, advocateId,
     zegoRoomId, zegoToken, zegoAppId, zegoAppSign, mode: callMode,
     scheduledSlot, bookingId, bookingDate, advocateUserId,
+    sessionExpiresAt: sessionExpiresAtParam, // ← from PaymentSuccess/BookingScreen
   } = route.params || {};
   const { user } = useAuth();
   const { isConnected } = useNetwork();
@@ -57,50 +58,89 @@ const ChatScreen = ({ navigation, route }) => {
     return () => clearTimeout(timer);
   }, [connected, chatInitializing]);
 
-  // ── Countdown Timer Logic ─────────────────────────────────────
+  // ── Countdown Timer — uses sessionExpiresAt set by admin ──────
   const [timeRemaining, setTimeRemaining] = useState(null);
-  const [chatExpired, setChatExpired] = useState(false);
+  const [chatExpired, setChatExpired]     = useState(false);
+  const [sessionLabel, setSessionLabel]   = useState('');
+  const [extendedToast, setExtendedToast] = useState(false); // ← brief toast on extend
+  const timerRef    = useRef(null);   // interval id
+  const expiresRef  = useRef(null);   // latest expiry ISO string
 
+  // Core: start/restart the 1-second tick from a given expiresAt
+  const startTimer = useCallback((expiresAt) => {
+    if (!expiresAt) return;
+    expiresRef.current = expiresAt;
+    if (timerRef.current) clearInterval(timerRef.current);
+    setChatExpired(false);
+
+    const tick = () => {
+      const diff = new Date(expiresRef.current).getTime() - Date.now();
+      if (diff <= 0) {
+        setChatExpired(true);
+        setTimeRemaining('00h 00m 00s');
+        clearInterval(timerRef.current);
+      } else {
+        const h = Math.floor(diff / 3_600_000);
+        const m = Math.floor((diff % 3_600_000) / 60_000);
+        const s = Math.floor((diff % 60_000) / 1000);
+        setTimeRemaining(
+          `${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`
+        );
+      }
+    };
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+  }, []);
+
+  // Initial load: resolve expiry from param / API / fallback
   useEffect(() => {
-    if (!bookingDate) return;
-
-    let timerInterval;
-    const fetchAndStartTimer = async () => {
-      try {
-        // Fetch buffer hours from settings
-        const res = await api.get('/settings');
-        const bufferHours = res.data?.data?.postConsultationBufferHours ?? 24;
-        
-        const scheduledStart = new Date(bookingDate).getTime();
-        // Base 1 hour consultation + buffer
-        const expiryTime = scheduledStart + (60 * 60 * 1000) + (bufferHours * 60 * 60 * 1000);
-
-        const updateTimer = () => {
-          const now = Date.now();
-          const diff = expiryTime - now;
-
-          if (diff <= 0) {
-            setChatExpired(true);
-            setTimeRemaining('00h 00m 00s');
-            clearInterval(timerInterval);
-          } else {
-            const h = Math.floor(diff / (1000 * 60 * 60));
-            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const s = Math.floor((diff % (1000 * 60)) / 1000);
-            setTimeRemaining(`${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`);
+    const resolveExpiry = async () => {
+      if (sessionExpiresAtParam) {
+        setSessionLabel(callMode === 'chat' ? 'Chat access' : callMode === 'video' ? 'Video access' : 'Voice access');
+        startTimer(sessionExpiresAtParam);
+        return;
+      }
+      if (bookingId) {
+        try {
+          const res = await api.get(`/bookings/${bookingId}`);
+          const expires = res.data?.data?.sessionExpiresAt || res.data?.data?.booking?.sessionExpiresAt;
+          const mode    = res.data?.data?.consultationMode || callMode || 'chat';
+          if (expires) {
+            setSessionLabel(mode === 'chat' ? 'Chat access' : mode === 'video' ? 'Video access' : 'Voice access');
+            startTimer(expires);
+            return;
           }
-        };
+        } catch (err) {
+          console.log('[Timer] booking fetch failed:', err.message);
+        }
+      }
+      if (bookingDate) {
+        startTimer(new Date(bookingDate).getTime() + 24 * 3_600_000);
+      }
+    };
+    resolveExpiry();
+    return () => clearInterval(timerRef.current);
+  }, [bookingId, sessionExpiresAtParam, bookingDate, callMode, startTimer]);
 
-        updateTimer(); // initial call
-        timerInterval = setInterval(updateTimer, 1000);
-      } catch (err) {
-        console.log('Failed to fetch settings for timer:', err.message);
+  // ── Socket: listen for admin session extension ────────────────
+  useEffect(() => {
+    const socket = getSocket?.();
+    if (!socket || !bookingId) return;
+
+    const onSessionExtended = (data) => {
+      // Only handle if it's for this booking
+      if (data?.bookingId && data.bookingId !== bookingId) return;
+      if (data?.sessionExpiresAt) {
+        startTimer(data.sessionExpiresAt);
+        // Show brief toast
+        setExtendedToast(true);
+        setTimeout(() => setExtendedToast(false), 4000);
       }
     };
 
-    fetchAndStartTimer();
-    return () => clearInterval(timerInterval);
-  }, [bookingDate]);
+    socket.on('session_extended', onSessionExtended);
+    return () => socket.off('session_extended', onSessionExtended);
+  }, [bookingId, startTimer]);
 
   // ── Send message handler ──────────────────────────────────────
   const handleSend = () => {
@@ -408,18 +448,18 @@ const ChatScreen = ({ navigation, route }) => {
         <View style={{ flexDirection: 'row', gap: 12 }}>
           {/* Voice Call Button */}
           <TouchableOpacity
-            style={styles.callBtn}
-            onPress={() => startCall('voice')}
+            style={[styles.callBtn, chatExpired && { opacity: 0.35 }]}
+            onPress={() => !chatExpired && startCall('voice')}
           >
-            <Ionicons name="call-outline" size={20} color={COLORS.primary} />
+            <Ionicons name="call-outline" size={20} color={chatExpired ? '#9CA3AF' : COLORS.primary} />
           </TouchableOpacity>
 
           {/* Video Call Button */}
           <TouchableOpacity
-            style={styles.callBtn}
-            onPress={() => startCall('video')}
+            style={[styles.callBtn, chatExpired && { opacity: 0.35 }]}
+            onPress={() => !chatExpired && startCall('video')}
           >
-            <Ionicons name="videocam-outline" size={20} color={COLORS.primary} />
+            <Ionicons name="videocam-outline" size={20} color={chatExpired ? '#9CA3AF' : COLORS.primary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -434,21 +474,30 @@ const ChatScreen = ({ navigation, route }) => {
         </View>
       )}
 
-      {/* Countdown Timer Banner */}
+      {/* Countdown Timer Banner — admin-configured duration */}
       {timeRemaining && !chatExpired && (
         <View style={styles.timerBanner}>
           <Ionicons name="hourglass-outline" size={14} color="#B45309" />
           <Text style={styles.timerBannerText}>
-            Consultation ends in: {timeRemaining}
+            {sessionLabel || 'Session'} ends in: {timeRemaining}
           </Text>
         </View>
       )}
 
       {chatExpired && (
         <View style={[styles.timerBanner, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}>
-          <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+          <Ionicons name="lock-closed-outline" size={14} color="#DC2626" />
           <Text style={[styles.timerBannerText, { color: '#DC2626' }]}>
-            Consultation time window has expired.
+            {sessionLabel || 'Session'} expired. Admin can extend from dashboard.
+          </Text>
+        </View>
+      )}
+      {/* ✅ Session Extended toast — real-time from admin */}
+      {extendedToast && (
+        <View style={[styles.timerBanner, { backgroundColor: '#DCFCE7', borderColor: '#86EFAC' }]}>
+          <Ionicons name="checkmark-circle-outline" size={14} color="#16A34A" />
+          <Text style={[styles.timerBannerText, { color: '#16A34A' }]}>
+            ✅ Session extended by admin! Timer updated.
           </Text>
         </View>
       )}

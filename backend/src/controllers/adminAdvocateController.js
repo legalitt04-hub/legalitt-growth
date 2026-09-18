@@ -230,9 +230,8 @@ exports.processWithdrawal = async (req, res, next) => {
     withdrawal.adminNote = adminNote;
 
     if (action === 'approve') {
-      if (!transactionId) return next(new AppError('Transaction ID is required to approve.', 400));
       withdrawal.status = 'paid';
-      withdrawal.transactionId = transactionId;
+      withdrawal.transactionId = transactionId || null; // optional — can add later
 
       // Update advocate wallet
       await Advocate.findByIdAndUpdate(withdrawal.advocate._id, {
@@ -269,6 +268,27 @@ exports.processWithdrawal = async (req, res, next) => {
 
     await withdrawal.save();
     logger.info(`Admin ${req.user.email} ${action}d withdrawal ${withdrawal._id} for ₹${withdrawal.amount}`);
+
+    // ── Socket: real-time update to advocate ─────────────────────────────────
+    try {
+      const { getIO } = require('../config/socket');
+      const io = getIO();
+      // Tell advocate their withdrawal was processed
+      io.to(`user:${withdrawal.advocateUser._id.toString()}`).emit('withdrawal_processed', {
+        withdrawalId: withdrawal._id.toString(),
+        status:       withdrawal.status,   // 'paid' | 'rejected'
+        amount:       withdrawal.amount,
+        transactionId: withdrawal.transactionId || null,
+        adminNote:    adminNote || null,
+      });
+      // Refresh withdrawal list for all admin tabs
+      io.to('admin_room').emit('withdrawal_updated', {
+        withdrawalId: withdrawal._id.toString(),
+        status:       withdrawal.status,
+      });
+    } catch (socketErr) {
+      logger.warn(`[Socket] withdrawal emit failed: ${socketErr.message}`);
+    }
 
     res.json({
       success: true,

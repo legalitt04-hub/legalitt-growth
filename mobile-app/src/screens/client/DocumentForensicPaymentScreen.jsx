@@ -15,6 +15,7 @@ import { legalAdviceAPI, paymentAPI, uploadAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { usePricing } from '../../context/PricingContext';
 import RazorpayCheckout from 'react-native-razorpay';
+import TestModeBanner from '../../components/TestModeBanner';
 
 // ─── COLOR PALETTE ─────────────────────────────────────────────────────────────
 const PALETTE = {
@@ -236,6 +237,8 @@ export default function DocumentForensicPaymentScreen({ navigation, route }) {
 
         {/* ─── 3. PAYMENT METHODS ───────────────────────────────────────── */}
         <Text style={styles.paymentMethodsHeading}>Select Payment Method</Text>
+
+        <TestModeBanner />
 
         <View style={styles.methodsList}>
           {PAYMENT_METHODS.map((method) => {

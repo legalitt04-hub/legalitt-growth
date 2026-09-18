@@ -1,87 +1,129 @@
 const DISCLAIMER = '\n\n⚠️ DISCLAIMER: This is AI-generated information for educational purposes only. It does NOT constitute legal advice. Please consult a qualified advocate for your specific situation.';
 
+// ── Groq models in priority order (Sep 2026 confirmed active) ────────────────
+// Each model is tried in order — if model_not_found, next one is tried automatically
+const GROQ_MODELS = [
+  'meta-llama/llama-4-maverick-17b-128e-instruct', // Best quality — Llama 4
+  'llama-3.3-70b-versatile',                        // High quality — Llama 3.3
+  'meta-llama/llama-4-scout-17b-16e-instruct',      // Llama 4 Scout
+  'llama-3.1-8b-instant',                           // Fastest — always available
+];
+
+const isModelError = (status, msg = '') =>
+  status === 404 ||
+  msg.includes('model_not_found') ||
+  msg.includes('not found') ||
+  msg.includes('decommissioned') ||
+  msg.includes('does not exist') ||
+  msg.includes('model does not');
+
 const callAI = async (messages, onChunk = null) => {
-  // 1. Try Groq (Llama 3.3) first - High Reliability
+  // 1. Try Groq first — ultra-fast inference, free tier
   if (process.env.GROQ_API_KEY) {
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: messages.map(m => ({ 
-            role: m.role === 'assistant' || m.role === 'bot' || m.role === 'model' ? 'assistant' : 'user', 
-            content: m.content 
-          })),
-          temperature: 0.7,
-          max_tokens: 1024,
-          stream: !!onChunk // Only stream if onChunk callback provided
-        })
-      });
+    for (const model of GROQ_MODELS) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: messages.map(m => ({
+              role: m.role === 'assistant' || m.role === 'bot' || m.role === 'model'
+                ? 'assistant' : 'user',
+              content: String(m.content || ''),
+            })),
+            temperature: 0.7,
+            max_tokens: 2048,
+            stream: !!onChunk,
+          }),
+        });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message || 'Groq failed');
-      }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const errMsg = err.error?.message || `HTTP ${res.status}`;
+          if (isModelError(res.status, errMsg)) {
+            console.warn(`[Groq] ${model} → model_not_found, trying next…`);
+            continue; // Try next model
+          }
+          throw new Error(errMsg);
+        }
 
-      if (onChunk) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
-          
-          for (const line of lines) {
-            const message = line.replace(/^data: /, '');
-            if (message === '[DONE]') break;
-            
-            try {
-              const parsed = JSON.parse(message);
-              const content = parsed.choices[0].delta?.content || '';
-              if (content) {
-                fullText += content;
-                onChunk(content);
-              }
-            } catch (e) {
-              // Ignore partial JSON errors
+        // ── Streaming response ─────────────────────────────────────────────
+        if (onChunk) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let fullText = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split('\n')) {
+              const trimmed = line.replace(/^data:\s*/, '').trim();
+              if (!trimmed || trimmed === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(trimmed);
+                const content = parsed.choices?.[0]?.delta?.content || '';
+                if (content) {
+                  fullText += content;
+                  onChunk(content);
+                }
+              } catch (_) { /* ignore partial JSON */ }
             }
           }
+          console.log(`[Groq] ✅ Streamed ${fullText.length} chars via ${model}`);
+          return fullText;
         }
-        return fullText;
-      } else {
+
+        // ── Non-streaming response ─────────────────────────────────────────
         const data = await res.json();
-        return data.choices[0].message.content;
+        const reply = data.choices?.[0]?.message?.content || '';
+        console.log(`[Groq] ✅ ${reply.length} chars via ${model}`);
+        return reply;
+
+      } catch (e) {
+        console.warn(`[Groq] ${model} error:`, e.message);
+        // Only continue to next model if it's a model availability issue
+        if (!isModelError(0, e.message || '')) break;
       }
-    } catch (e) { console.warn('Groq failed, falling back:', e.message); }
+    }
+    console.warn('[Groq] All models failed → trying Gemini.');
   }
 
-  // 2. Try Gemini (Fallback)
+  // 2. Try Gemini (Fallback) ─────────────────────────────────────────────────
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: messages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : m.role,
-            parts: [{ text: m.content }]
-          })),
-          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) return data.candidates[0].content.parts[0].text;
-      console.warn('Gemini failed:', data.error?.message);
-    } catch (e) { console.warn('Gemini fetch error:', e.message); }
+    const geminiModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+    for (const gModel of geminiModels) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: messages.map(m => ({
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: String(m.content || '') }],
+              })),
+              generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+            }),
+          }
+        );
+        const data = await res.json();
+        if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          console.log(`[Gemini] ✅ Response via ${gModel}`);
+          return data.candidates[0].content.parts[0].text;
+        }
+        console.warn(`[Gemini] ${gModel} failed:`, data.error?.message);
+      } catch (e) {
+        console.warn(`[Gemini] ${gModel} error:`, e.message);
+      }
+    }
   }
 
   // 3. Fallback legal guidance generator if API key is not configured or AI fails

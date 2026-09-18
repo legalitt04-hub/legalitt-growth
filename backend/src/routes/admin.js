@@ -157,6 +157,90 @@ router.get('/bookings/:id',                bookingAssignController.getBookingDet
 router.post('/bookings/:id/assign',        bookingAssignController.assignAdvocate);
 router.get('/bookings/:id/nearby-advocates', bookingAssignController.getNearbyAdvocatesForBooking);
 router.patch('/bookings/:id/status',       bookingAssignController.updateBookingStatus);
+router.patch('/bookings/:id/extend-session', async (req, res, next) => {
+  try {
+    const Booking  = require('../models/Booking');
+    const Settings = require('../models/Settings');
+    const { createNotification } = require('../utils/notificationHelper');
+    const { getIO }              = require('../config/socket');
+    const { addHours = 1, reason = '' } = req.body;
+
+    const hours = Number(addHours);
+    if (!hours || hours < 0.5 || hours > 72) {
+      return res.status(400).json({ success: false, message: 'addHours must be between 0.5 and 72.' });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
+
+    // Check max extension limit from settings
+    const settings = await Settings.findOne().lean();
+    const maxHours = settings?.maxExtensionHours ?? 24;
+    const totalExtended = (booking.extensionHistory || []).reduce((s, e) => s + (e.addedHours || 0), 0);
+    if (totalExtended + hours > maxHours) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum extension limit is ${maxHours}h. Already extended by ${totalExtended}h.`,
+      });
+    }
+
+    // Extend from current expiry (or now if already expired)
+    const base = booking.sessionExpiresAt && new Date(booking.sessionExpiresAt) > new Date()
+      ? new Date(booking.sessionExpiresAt)
+      : new Date();
+    const newExpiresAt = new Date(base.getTime() + hours * 3_600_000);
+
+    booking.sessionExpiresAt = newExpiresAt;
+    booking.extensionHistory = booking.extensionHistory || [];
+    booking.extensionHistory.push({
+      extendedBy:  req.user._id,
+      extendedAt:  new Date(),
+      addedHours:  hours,
+      reason:      reason || 'Extended by admin',
+      newExpiresAt,
+    });
+    await booking.save();
+
+    // ── Socket: real-time timer update in ChatScreen ─────────────────
+    try {
+      const io = getIO();
+      const payload = {
+        bookingId:        booking._id.toString(),
+        sessionExpiresAt: newExpiresAt.toISOString(),
+        addedHours:       hours,
+        reason:           reason || 'Extended by admin',
+      };
+      // Emit to client's personal room
+      io.to(`user:${booking.client.toString()}`).emit('session_extended', payload);
+      // Also emit to the booking's chat room (advocate can see too)
+      if (booking.chat) {
+        io.to(`chat:${booking.chat.toString()}`).emit('session_extended', payload);
+      }
+    } catch (socketErr) {
+      require('../utils/logger').warn(`[Session] Socket emit failed: ${socketErr.message}`);
+    }
+
+    // Notify client (push notification)
+    try {
+      await createNotification({
+        recipientId: booking.client,
+        senderId:    req.user._id,
+        title:       '⏰ Session Extended!',
+        message:     `Your consultation session has been extended by ${hours}h. New expiry: ${newExpiresAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
+        type:        'general',
+        data:        { bookingId: booking._id },
+      });
+    } catch (_) {}
+
+    require('../utils/logger').info(`[Session] Admin ${req.user.email} extended booking ${booking._id} by ${hours}h → ${newExpiresAt.toISOString()}`);
+
+    res.json({
+      success: true,
+      message: `Session extended by ${hours}h. Expires at ${newExpiresAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
+      data: { sessionExpiresAt: newExpiresAt, extensionHistory: booking.extensionHistory },
+    });
+  } catch (err) { next(err); }
+});
 
 // ─── Advocate Approval & Rejection ────────────────────────────────────────────
 const adminAdvocateController = require('../controllers/adminAdvocateController');

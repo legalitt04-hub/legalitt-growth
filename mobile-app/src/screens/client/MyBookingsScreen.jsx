@@ -464,7 +464,7 @@ export default function MyBookingsScreen({ navigation }) {
                 zegoRoomId:    item.videoRoomId  || `legalitt-${item._id}`,
                 zegoToken:     item.videoRoomToken || null,
                 zegoAppId:     item.zegoAppId || 0,
-                zegoAppSign:   '',
+                zegoAppSign:   item.advocateVideoToken ? String(require('expo-constants').default.expoConfig?.extra?.ZEGO_APP_SIGN || '') : '',
                 mode:          item.consultationMode,
                 scheduledSlot: slotText,
                 bookingId:     item._id,

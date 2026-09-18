@@ -25,7 +25,8 @@ import {
   Microscope,
   Tag,
   IndianRupee,
-  ScrollText
+  ScrollText,
+  CalendarDays
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRole } from '../../contexts/RoleContext';
@@ -42,12 +43,13 @@ const navSections = [
   {
     title: 'Consultations & Operations',
     items: [
-      { icon: MessageSquare, label: 'Consultations & Chats', path: '/consultations' },
-      { icon: Briefcase, label: 'Cases & Legal Notices', path: '/cases' },
-      { icon: ScrollText, label: 'Legal Notices', path: '/legal-notices' },
-      { icon: FileText, label: 'FIR Drafts', path: '/fir-drafts' },
-      { icon: Building, label: 'Property Research', path: '/property-research' },
-      { icon: Microscope, label: 'Document Forensic', path: '/document-forensic' },
+      { icon: MessageSquare,  label: 'Consultations & Chats',  path: '/consultations' },
+      { icon: CalendarDays,   label: 'Calendar & Schedule',    path: '/calendar' },
+      { icon: Briefcase,      label: 'Cases & Legal Notices',  path: '/cases' },
+      { icon: ScrollText,     label: 'Legal Notices',          path: '/legal-notices' },
+      { icon: FileText,       label: 'FIR Drafts',             path: '/fir-drafts' },
+      { icon: Building,       label: 'Property Research',      path: '/property-research' },
+      { icon: Microscope,     label: 'Document Forensic',      path: '/document-forensic' },
     ]
   },
   {
