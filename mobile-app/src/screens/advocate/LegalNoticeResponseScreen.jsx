@@ -10,6 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { legalAdviceAPI, uploadAPI } from '../../services/api';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 /* ── Theme ──────────────────────────────────────────── */
 const T = {
@@ -151,6 +153,31 @@ export default function LegalNoticeResponseScreen({ navigation, route }) {
       setDraftText(backendDraft);
       setAiGenerated(false);
       Alert.alert('Draft Loaded', 'Your saved draft has been loaded. Review it before uploading the signed response.');
+    }
+  };
+
+
+  /* ── Save draft to device ── */
+  const handleSaveToDevice = async () => {
+    if (!draftText.trim()) {
+      Alert.alert('Empty Draft', 'Please write or generate a draft first.');
+      return;
+    }
+    try {
+      const filename = `${isLegalAdvice ? 'Legal_Advice' : 'Legal_Notice_Response'}_${bookingId}.txt`;
+      const fileUri = FileSystem.documentDirectory + filename;
+      await FileSystem.writeAsStringAsync(fileUri, draftText, { encoding: FileSystem.EncodingType.UTF8 });
+      
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/plain',
+          dialogTitle: 'Save Draft to Device'
+        });
+      } else {
+        Alert.alert('Download Ready', `File saved internally at: ${fileUri}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not save file to device.');
     }
   };
 
@@ -465,6 +492,10 @@ export default function LegalNoticeResponseScreen({ navigation, route }) {
                   </TouchableOpacity>
 
                   {draftText ? (
+                    <TouchableOpacity style={s.outlineBtn} onPress={handleSaveToDevice} activeOpacity={0.8} style={[{marginRight: 10}, s.clearBtn]}>
+                      <Ionicons name="download-outline" size={15} color={T.primary} />
+                      <Text style={[s.clearBtnText, {color: T.primary}]}>Save to Device</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity style={s.clearBtn} onPress={() => { setDraftText(''); setAiGenerated(false); }}>
                       <Ionicons name="refresh-outline" size={15} color={T.muted} />
                       <Text style={s.clearBtnText}>Clear</Text>
