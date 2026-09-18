@@ -20,7 +20,19 @@ import { bookingAPI, firAPI, chatAPI, legalAdviceAPI } from '../../services/api'
 const ProfileScreen = ({ navigation }) => {
   const { user, isAuthenticated, refreshUser, logout } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [completeness, setCompleteness] = useState(user?.completeness || 0);
+  const [completeness, setCompleteness] = useState(0);
+
+  const calculateCompleteness = (userData) => {
+    if (!userData) return 0;
+    let score = 0;
+    if (userData.name) score += 25;
+    if (userData.email) score += 25;
+    if (userData.phone) score += 20;
+    if (userData.avatar && !userData.avatar.includes('ui-avatars.com')) score += 15;
+    if (userData.city || userData.state) score += 15;
+    return Math.min(score, 100);
+  };
+
   const [stats, setStats] = useState({ consultations: 0, drafts: 0, chats: 0 });
 
   useEffect(() => {
@@ -37,7 +49,7 @@ const ProfileScreen = ({ navigation }) => {
   }, [navigation, isAuthenticated]);
 
   useEffect(() => {
-    if (user) setCompleteness(user.completeness || 0);
+    if (user) setCompleteness(calculateCompleteness(user));
   }, [user]);
 
   const fetchRealStats = async () => {
