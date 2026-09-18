@@ -27,7 +27,6 @@ const LineChart = ({ points }) => {
   return (
     <View style={{ height: 80, marginTop: 8 }}>
       <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`}>
-        // Better path rendering for the chart
         <Polyline fill="none" stroke={COLORS.primary} strokeWidth="2.5"
           strokeLinecap="round" strokeLinejoin="round" points={pointsStr} />
         {svgPts.map((p, i) => (
@@ -241,7 +240,7 @@ const EarningsScreen = ({ navigation }) => {
                 return (
                   <View key={i} style={s.barWrap}>
                     <View style={s.barBg}>
-                      <View style={[s.bar, { height: `${((m.earnings || 0) / maxVal) * 100}%` },
+                      <View style={[s.bar, { height: `${((m.earnings || 0) / currentMaxVal) * 100}%` },
                         isActive ? s.barActive : s.barInactive]} />
                     </View>
                     <Text style={[s.barLabel, isActive && s.barLabelActive]}>{m.month || m.label}</Text>
